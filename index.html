@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>Crop Memo Pro</title>
+<meta name="theme-color" content="#639922">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="CropMemo">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <!-- 홈 -->
+  <section id="view-home" class="view on"></section>
+  <!-- 야장 수집 -->
+  <section id="view-collect" class="view"></section>
+  <!-- 내보내기 -->
+  <section id="view-export" class="view"></section>
+  <!-- 분석 -->
+  <section id="view-analysis" class="view"></section>
+  <!-- 설정 -->
+  <section id="view-settings" class="view"></section>
+  <!-- 새 과제 생성 -->
+  <section id="view-new" class="view"></section>
+  <!-- 과제 수정 -->
+  <section id="view-genedit" class="view"></section>
+  <!-- 라벨 일괄등록 -->
+  <section id="view-bulk" class="view"></section>
+  <!-- 라벨 OCR 스캔 -->
+  <section id="view-ocr" class="view"></section>
+  <!-- 문자형 손글씨/그리기 -->
+  <section id="view-write" class="view"></section>
+  <!-- 사진 -->
+  <section id="view-photo" class="view"></section>
+  <!-- 그리기(주석) -->
+  <section id="view-draw" class="view"></section>
+  <!-- 음성 -->
+  <section id="view-voice" class="view"></section>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab on" data-view="home"><i class="ti ti-home" style="font-size:22px"></i>홈</button>
+    <button class="tab" data-view="collect"><i class="ti ti-clipboard-list" style="font-size:22px"></i>조사</button>
+    <button class="tab" data-view="analysis"><i class="ti ti-chart-bar" style="font-size:22px"></i>분석</button>
+    <button class="tab" data-view="export"><i class="ti ti-file-export" style="font-size:22px"></i>내보내기</button>
+    <button class="tab" data-view="settings"><i class="ti ti-settings" style="font-size:22px"></i>설정</button>
+  </nav>
+</div>
+<div id="toast" class="toast"></div>
+
+<script src="icons.js"></script>
+<script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then(function (reg) { try { reg.update(); } catch (e) {} })
+        .catch(function (e) { console.warn('SW 등록 실패', e); });
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (reloaded) return; reloaded = true; location.reload();
+      });
+    });
+  }
+</script>
+</body>
+</html>

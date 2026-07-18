@@ -1,0 +1,17 @@
+{
+  "name": "Crop Memo Pro",
+  "short_name": "CropMemo",
+  "description": "채소 육종 야장 - 오프라인 현장 데이터 수집 · 동기화",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ECEFE8",
+  "theme_color": "#639922",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
