@@ -37,6 +37,12 @@ button{font-family:inherit;color:inherit}
 .tab.on{color:var(--green-ink);font-weight:600}
 .toast{position:fixed;left:50%;bottom:74px;transform:translateX(-50%);background:var(--green-ink);color:#fff;font-size:13px;padding:9px 15px;border-radius:20px;z-index:99;opacity:0;transition:opacity .15s;pointer-events:none;max-width:90%}
 .toast.show{opacity:1}
+.ovl{position:fixed;inset:0;background:rgba(20,24,18,.45);display:flex;align-items:center;justify-content:center;z-index:120;padding:24px}
+.ovl-box{background:var(--surface-2);border-radius:16px;padding:18px 16px 14px;width:100%;max-width:340px;box-shadow:0 12px 32px rgba(0,0,0,.22)}
+.ovl-title{font-size:16px;font-weight:700;margin-bottom:6px}
+.ovl-msg{font-size:13px;color:var(--text-secondary);line-height:1.6}
+.ovl-btns{display:flex;gap:8px;margin-top:16px}
+.ovl-btns .btn{flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:5px}
 .card{background:var(--surface-1);border-radius:12px;padding:11px 12px}
 .scroll-x{display:flex;gap:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .scroll-x::-webkit-scrollbar{display:none}

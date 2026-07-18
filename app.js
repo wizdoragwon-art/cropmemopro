@@ -81,6 +81,19 @@
   function betacf(a, b, x) { var MAXIT = 300, EPS = 3e-12, FPMIN = 1e-300; var qab = a + b, qap = a + 1, qam = a - 1, c = 1, d = 1 - qab * x / qap; if (Math.abs(d) < FPMIN) d = FPMIN; d = 1 / d; var h = d; for (var m = 1; m <= MAXIT; m++) { var m2 = 2 * m; var aa = m * (b - m) * x / ((qam + m2) * (a + m2)); d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d; h *= d * c; aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2)); d = 1 + aa * d; if (Math.abs(d) < FPMIN) d = FPMIN; c = 1 + aa / c; if (Math.abs(c) < FPMIN) c = FPMIN; d = 1 / d; var del = d * c; h *= del; if (Math.abs(del - 1) < EPS) break; } return h; }
   function betai(a, b, x) { if (x <= 0) return 0; if (x >= 1) return 1; var bt = Math.exp(gammln(a + b) - gammln(a) - gammln(b) + a * Math.log(x) + b * Math.log(1 - x)); if (x < (a + 1) / (a + b + 2)) return bt * betacf(a, b, x) / a; else return 1 - bt * betacf(b, a, 1 - x) / b; }
   function fpval(F, df1, df2) { if (F <= 0) return 1; return betai(df2 / 2, df1 / 2, df2 / (df2 + df1 * F)); }
+  function tpval(t, df) { if (!isFinite(t) || df <= 0) return 1; return betai(df / 2, 0.5, df / (df + t * t)); }
+  function pearson(xs, ys) {
+    var n = xs.length; if (n < 3) return null;
+    var mx = 0, my = 0, i;
+    for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; } mx /= n; my /= n;
+    var sxy = 0, sxx = 0, syy = 0;
+    for (i = 0; i < n; i++) { var dx = xs[i] - mx, dy = ys[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+    if (sxx <= 0 || syy <= 0) return null;
+    var r = sxy / Math.sqrt(sxx * syy), df = n - 2;
+    var t = r * Math.sqrt(df / Math.max(1e-12, 1 - r * r));
+    return { r: r, p: tpval(t, df), n: n, slope: sxy / sxx, intercept: my - (sxy / sxx) * mx, mx: mx, sxx: sxx, df: df,
+             sse: (function () { var s = 0; for (var k = 0; k < n; k++) { var pred = (my - (sxy / sxx) * mx) + (sxy / sxx) * xs[k]; s += Math.pow(ys[k] - pred, 2); } return s; })() };
+  }
   function erf(x) { var t = 1 / (1 + 0.3275911 * Math.abs(x)); var y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
   function ncdf(z) { return 0.5 * (1 + erf(z / Math.SQRT2)); }
   function prange(q, k) { if (q <= 0) return 0; var lo = -8, hi = 8, n = 240, h = (hi - lo) / n, s = 0; for (var i = 0; i <= n; i++) { var u = lo + i * h; var phi = Math.exp(-u * u / 2) / Math.sqrt(2 * Math.PI); var d = ncdf(u) - ncdf(u - q); if (d < 0) d = 0; var f = k * phi * Math.pow(d, k - 1); var w = (i === 0 || i === n) ? 1 : (i % 2 ? 4 : 2); s += w * f; } return s * h / 3; }
@@ -790,14 +803,57 @@
       '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 수정·삭제할 수 있어요 · 시계열 형질(' + ico('clock', '#3B6D11', 10) + ')만 조사일마다 저장</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
-    $('cNewDate').onclick = function () { var d = prompt('새 조사일 (예: ' + todayStr() + ')', todayStr()); if (d == null) return; d = d.trim(); if (!d) return; if (g.surveyDates.indexOf(d) < 0) { g.surveyDates.push(d); kvSet('gens', S.gens); } S.date = d; loadValsThen(renderCollect); toast(d + ' 조사 시작'); };
+    $('cNewDate').onclick = function () { newDatePopup(); };
   }
   function loadValsThen(cb) { loadVals().then(cb); }
+  function closeOverlay() { var o = document.getElementById('ovl'); if (o && o.parentNode) o.parentNode.removeChild(o); }
+  function openOverlay(html) {
+    closeOverlay();
+    var o = document.createElement('div'); o.className = 'ovl'; o.id = 'ovl';
+    o.innerHTML = '<div class="ovl-box">' + html + '</div>';
+    o.addEventListener('click', function (e) { if (e.target === o) closeOverlay(); });
+    document.body.appendChild(o);
+    return o;
+  }
   function dateMenu(d) {
-    var g = curGen();
-    if (g.surveyDates.length <= 1) { editDate(d); return; }
-    if (confirm('"' + d + '" 조사일\n\n[확인] 날짜 수정   [취소] 삭제 여부 묻기')) { editDate(d); return; }
-    if (confirm('"' + d + '" 조사일을 삭제할까요?\n이 날짜에 입력한 시계열 값도 함께 삭제됩니다.')) deleteSurveyDate(d);
+    var g = curGen(), only = g.surveyDates.length <= 1;
+    openOverlay(
+      '<div class="ovl-title">' + ico('calendar-event', '#3B6D11', 18) + ' 조사일 ' + esc(d) + '</div>' +
+      '<div class="ovl-msg">이 조사일을 수정하거나 삭제할 수 있습니다.' + (only ? '<br><span style="color:#B0721A">조사일이 하나뿐이라 삭제할 수 없습니다.</span>' : '') + '</div>' +
+      '<div class="ovl-btns">' +
+        '<button class="btn" id="dmCancel">취소</button>' +
+        '<button class="btn primary" id="dmEdit">' + ico('pencil', '#fff', 15) + ' 수정</button>' +
+        '<button class="btn" id="dmDel" style="color:#C0392B;border-color:#E3B4AE' + (only ? ';opacity:.45' : '') + '">' + ico('trash', '#C0392B', 15) + ' 삭제</button>' +
+      '</div>'
+    );
+    $('dmCancel').onclick = closeOverlay;
+    $('dmEdit').onclick = function () { dateEditPopup(d); };
+    $('dmDel').onclick = function () { if (only) { toast('조사일은 최소 1개 필요합니다'); return; } dateDeletePopup(d); };
+  }
+  function dateEditPopup(d) {
+    openOverlay(
+      '<div class="ovl-title">조사일 수정</div>' +
+      '<div class="ovl-msg">새 조사일을 입력하세요. 이 날짜로 입력한 값도 함께 옮겨집니다.</div>' +
+      '<input class="ein" id="dmInput" style="margin-top:12px;text-align:center;font-size:16px;font-weight:600" value="' + esc(d) + '">' +
+      '<div class="ovl-btns"><button class="btn" id="dmBack">취소</button><button class="btn primary" id="dmSave">저장</button></div>'
+    );
+    var inp = $('dmInput'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('dmBack').onclick = closeOverlay;
+    $('dmSave').onclick = function () {
+      var nv = (inp.value || '').trim();
+      if (!nv) { toast('조사일을 입력하세요'); return; }
+      closeOverlay();
+      if (nv !== d) renameSurveyDate(d, nv);
+    };
+  }
+  function dateDeletePopup(d) {
+    openOverlay(
+      '<div class="ovl-title" style="color:#C0392B">조사일 삭제</div>' +
+      '<div class="ovl-msg"><b>' + esc(d) + '</b> 조사일을 삭제할까요?<br>이 날짜에 입력한 시계열 값도 함께 삭제되며 되돌릴 수 없습니다.</div>' +
+      '<div class="ovl-btns"><button class="btn" id="dmNo">취소</button><button class="btn" id="dmYes" style="background:#C0392B;border-color:#A93226;color:#fff;font-weight:600">삭제</button></div>'
+    );
+    $('dmNo').onclick = closeOverlay;
+    $('dmYes').onclick = function () { closeOverlay(); deleteSurveyDate(d); };
   }
   function deleteSurveyDate(d) {
     var g = curGen(), idx = g.surveyDates.indexOf(d); if (idx < 0) return;
@@ -812,7 +868,23 @@
       });
     }).then(function () { return kvSet('gens', S.gens); }).then(function () { return loadVals(); }).then(function () { updatePending(); renderCollect(); toast('조사일 삭제됨 · ' + d); });
   }
-  function editDate(d) { var nv = prompt('조사일 수정 (예: ' + d + ')', d); if (nv == null) return; nv = nv.trim(); if (!nv || nv === d) return; renameSurveyDate(d, nv); }
+  function newDatePopup() {
+    var g = curGen();
+    openOverlay(
+      '<div class="ovl-title">새 조사 시작</div>' +
+      '<div class="ovl-msg">조사일을 입력하세요. 시계열 형질은 이 날짜로 저장됩니다.</div>' +
+      '<input class="ein" id="dmInput" style="margin-top:12px;text-align:center;font-size:16px;font-weight:600" value="' + esc(todayStr()) + '">' +
+      '<div class="ovl-btns"><button class="btn" id="dmBack">취소</button><button class="btn primary" id="dmSave">시작</button></div>'
+    );
+    var inp = $('dmInput'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('dmBack').onclick = closeOverlay;
+    $('dmSave').onclick = function () {
+      var d = (inp.value || '').trim(); if (!d) { toast('조사일을 입력하세요'); return; }
+      closeOverlay();
+      if (g.surveyDates.indexOf(d) < 0) { g.surveyDates.push(d); kvSet('gens', S.gens); }
+      S.date = d; loadValsThen(renderCollect); toast(d + ' 조사 시작');
+    };
+  }
   function renameSurveyDate(oldD, newD) {
     var g = curGen(), idx = g.surveyDates.indexOf(oldD); if (idx < 0) return;
     if (g.surveyDates.indexOf(newD) >= 0) { toast('이미 있는 조사일입니다'); return; }
@@ -1043,17 +1115,430 @@
   }
   function indivEntered(lineId, iv) { var g = curGen(); for (var i = 0; i < g.traits.length; i++) { var t = g.traits[i]; var k = g.id + ':' + lineId + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : ''); if (S.vals[k] != null && S.vals[k] !== '') return true; } return false; }
 
+  // ---------- PUBLICATION CHARTS (ggpubr style) ----------
+  var CW = 720, CH = 470, CM = { l: 84, r: 26, t: 54, b: 78 };
+  function axLabel(t) { return esc(t == null ? '' : String(t)); }
+  function niceTicks(min, max, n) {
+    if (!(max > min)) { max = min + 1; }
+    var span = max - min, step = Math.pow(10, Math.floor(Math.log(span / n) / Math.LN10));
+    var err = (span / n) / step;
+    if (err >= 7.5) step *= 10; else if (err >= 3.5) step *= 5; else if (err >= 1.5) step *= 2;
+    var t0 = Math.ceil(min / step) * step, out = [];
+    for (var v = t0; v <= max + step * 0.5; v += step) out.push(Math.round(v * 1e6) / 1e6);
+    return out;
+  }
+  function svgOpen() { return '<svg xmlns="http://www.w3.org/2000/svg" width="' + CW + '" height="' + CH + '" viewBox="0 0 ' + CW + ' ' + CH + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + CW + '" height="' + CH + '" fill="#ffffff"/>'; }
+  function svgFrame(title, xlab, ylab) {
+    var x0 = CM.l, y0 = CH - CM.b, x1 = CW - CM.r, y1 = CM.t;
+    return '<text x="' + (CW / 2) + '" y="30" text-anchor="middle" font-size="19" font-weight="700" fill="#1B1E19">' + axLabel(title) + '</text>' +
+      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x1 + '" y2="' + y0 + '" stroke="#1B1E19" stroke-width="1.3"/>' +
+      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 + '" stroke="#1B1E19" stroke-width="1.3"/>' +
+      '<text x="' + ((x0 + x1) / 2) + '" y="' + (CH - 22) + '" text-anchor="middle" font-size="15" fill="#1B1E19">' + axLabel(xlab) + '</text>' +
+      '<text x="24" y="' + ((y0 + y1) / 2) + '" text-anchor="middle" font-size="15" fill="#1B1E19" transform="rotate(-90 24 ' + ((y0 + y1) / 2) + ')">' + axLabel(ylab) + '</text>';
+  }
+  function pTxt(p) { return p < 0.0001 ? 'p < 0.0001' : 'p = ' + (p < 0.001 ? p.toExponential(1) : round(p, 4)); }
+
+  function chartHistogram(vals, tName, unit, title, dom) {
+    if (!vals.length) return null;
+    var x0 = CM.l, y0 = CH - CM.b, x1 = CW - CM.r, y1 = CM.t;
+    var mn, mx, k;
+    if (dom) { mn = dom.mn; mx = dom.mx; k = dom.k; }
+    else {
+      mn = Math.min.apply(null, vals); mx = Math.max.apply(null, vals);
+      if (mn === mx) { mn -= 0.5; mx += 0.5; }
+      k = Math.max(5, Math.min(20, Math.ceil(Math.sqrt(vals.length))));
+    }
+    var bw = (mx - mn) / k, bins = new Array(k).fill(0);
+    vals.forEach(function (v) { var i = Math.min(k - 1, Math.max(0, Math.floor((v - mn) / bw))); bins[i]++; });
+    var top = dom && dom.ymax ? dom.ymax : Math.max.apply(null, bins), yt = niceTicks(0, top, 5), ymax = yt[yt.length - 1];
+    var xt = niceTicks(mn, mx, 6);
+    var sx = function (v) { return x0 + (v - mn) / (mx - mn) * (x1 - x0); };
+    var sy = function (v) { return y0 - v / ymax * (y0 - y1); };
+    var s = svgOpen() + svgFrame(title, tName + (unit ? ' (' + unit + ')' : ''), 'count');
+    bins.forEach(function (c, i) {
+      if (!c) return;
+      var bx = sx(mn + i * bw), bx2 = sx(mn + (i + 1) * bw);
+      s += '<rect x="' + bx.toFixed(1) + '" y="' + sy(c).toFixed(1) + '" width="' + Math.max(1, bx2 - bx - 1.5).toFixed(1) + '" height="' + (y0 - sy(c)).toFixed(1) + '" fill="#7FB069" fill-opacity="0.65" stroke="#3B6D11" stroke-width="1"/>';
+    });
+    var mean = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+    s += '<line x1="' + sx(mean).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(mean).toFixed(1) + '" y2="' + y1 + '" stroke="#C0392B" stroke-width="1.6" stroke-dasharray="6 4"/>' +
+      '<text x="' + (sx(mean) + 6).toFixed(1) + '" y="' + (y1 + 14) + '" font-size="13" fill="#C0392B">mean = ' + round(mean, 2) + '</text>';
+    xt.forEach(function (v) { if (v < mn - 1e-9 || v > mx + 1e-9) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="#1B1E19"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    yt.forEach(function (v) { s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    s += '<text x="' + x1 + '" y="' + (y1 - 12) + '" text-anchor="end" font-size="13" fill="#59634F">n = ' + vals.length + ' · SD = ' + round(Math.sqrt(vals.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / Math.max(1, vals.length - 1)), 2) + '</text>';
+    return s + '</svg>';
+  }
+
+  function quantile(sorted, q) { var pos = (sorted.length - 1) * q, b = Math.floor(pos), rest = pos - b; return sorted[b + 1] !== undefined ? sorted[b] + rest * (sorted[b + 1] - sorted[b]) : sorted[b]; }
+  function chartBox(groups, tName, unit, title, xlab, dom) {
+    groups = groups.filter(function (g) { return g.vals.length; });
+    if (groups.length < 1) return null;
+    var x0 = CM.l, y0 = CH - CM.b, x1 = CW - CM.r, y1 = CM.t;
+    var all = []; groups.forEach(function (g) { all = all.concat(g.vals); });
+    var lo, hi;
+    if (dom) { lo = dom.lo; hi = dom.hi; }
+    else {
+      var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all), pad = (mx - mn) * 0.12 || 1;
+      lo = mn - pad; hi = mx + pad * 1.6;
+    }
+    var yt = niceTicks(lo, hi, 6);
+    var sy = function (v) { return y0 - (v - lo) / (hi - lo) * (y0 - y1); };
+    var bwid = (x1 - x0) / groups.length, box = Math.min(64, bwid * 0.5);
+    var s = svgOpen() + svgFrame(title, xlab, tName + (unit ? ' (' + unit + ')' : ''));
+    yt.forEach(function (v) { if (v < lo || v > hi) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    var pal = ['#3B6D11', '#C0392B', '#2f6fb0', '#B0721A', '#6D4C41', '#00838F'];
+    groups.forEach(function (g, i) {
+      var cx = x0 + bwid * (i + 0.5), sorted = g.vals.slice().sort(function (a, b) { return a - b; });
+      var q1 = quantile(sorted, 0.25), q2 = quantile(sorted, 0.5), q3 = quantile(sorted, 0.75), iqr = q3 - q1;
+      var wlo = sorted[0], whi = sorted[sorted.length - 1];
+      sorted.forEach(function (v) { if (v >= q1 - 1.5 * iqr && v <= q3 + 1.5 * iqr) { if (v < wlo || wlo < q1 - 1.5 * iqr) wlo = Math.max(wlo, v); } });
+      wlo = Math.min.apply(null, sorted.filter(function (v) { return v >= q1 - 1.5 * iqr; }));
+      whi = Math.max.apply(null, sorted.filter(function (v) { return v <= q3 + 1.5 * iqr; }));
+      var col = pal[i % pal.length];
+      s += '<line x1="' + cx + '" y1="' + sy(wlo).toFixed(1) + '" x2="' + cx + '" y2="' + sy(whi).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
+        '<line x1="' + (cx - box / 3) + '" y1="' + sy(whi).toFixed(1) + '" x2="' + (cx + box / 3) + '" y2="' + sy(whi).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
+        '<line x1="' + (cx - box / 3) + '" y1="' + sy(wlo).toFixed(1) + '" x2="' + (cx + box / 3) + '" y2="' + sy(wlo).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
+        '<rect x="' + (cx - box / 2) + '" y="' + sy(q3).toFixed(1) + '" width="' + box + '" height="' + Math.max(1, sy(q1) - sy(q3)).toFixed(1) + '" fill="#ffffff" stroke="' + col + '" stroke-width="1.5"/>' +
+        '<line x1="' + (cx - box / 2) + '" y1="' + sy(q2).toFixed(1) + '" x2="' + (cx + box / 2) + '" y2="' + sy(q2).toFixed(1) + '" stroke="' + col + '" stroke-width="2"/>';
+      sorted.forEach(function (v) { if (v < q1 - 1.5 * iqr || v > q3 + 1.5 * iqr) s += '<circle cx="' + cx + '" cy="' + sy(v).toFixed(1) + '" r="2.6" fill="none" stroke="' + col + '"/>'; });
+      var lbl = g.name.length > 9 ? g.name.slice(0, 8) + '…' : g.name;
+      s += '<text x="' + cx + '" y="' + (y0 + 20) + '" text-anchor="middle" font-size="12" fill="#1B1E19"' + (groups.length > 8 ? ' transform="rotate(-35 ' + cx + ' ' + (y0 + 20) + ')"' : '') + '>' + axLabel(lbl) + '</text>' +
+        '<text x="' + cx + '" y="' + (y0 + 38) + '" text-anchor="middle" font-size="10" fill="#8C9583">n=' + g.vals.length + '</text>';
+    });
+    if (groups.length >= 2) {
+      var an = anova1(groups.map(function (g) { return g.vals; }));
+      if (an && isFinite(an.F)) s += '<text x="' + ((x0 + x1) / 2) + '" y="' + (y1 - 12) + '" text-anchor="middle" font-size="14" fill="#1B1E19">' + (groups.length === 2 ? 't-test' : 'ANOVA') + ', ' + pTxt(an.p) + '</text>';
+    }
+    return s + '</svg>';
+  }
+
+  function chartScatter(pts, xName, xUnit, yName, yUnit, title, dom) {
+    if (pts.length < 3) return null;
+    var x0 = CM.l, y0 = CH - CM.b, x1 = CW - CM.r, y1 = CM.t;
+    var xs = pts.map(function (p) { return p.x; }), ys = pts.map(function (p) { return p.y; });
+    var xmn, xmx, ymn, ymx;
+    if (dom) { xmn = dom.xmn; xmx = dom.xmx; ymn = dom.ymn; ymx = dom.ymx; }
+    else {
+      xmn = Math.min.apply(null, xs); xmx = Math.max.apply(null, xs); ymn = Math.min.apply(null, ys); ymx = Math.max.apply(null, ys);
+      var xp = (xmx - xmn) * 0.08 || 1, yp = (ymx - ymn) * 0.12 || 1;
+      xmn -= xp; xmx += xp; ymn -= yp; ymx += yp * 1.4;
+    }
+    var sx = function (v) { return x0 + (v - xmn) / (xmx - xmn) * (x1 - x0); };
+    var sy = function (v) { return y0 - (v - ymn) / (ymx - ymn) * (y0 - y1); };
+    var s = svgOpen() + svgFrame(title, xName + (xUnit ? ' (' + xUnit + ')' : ''), yName + (yUnit ? ' (' + yUnit + ')' : ''));
+    niceTicks(xmn, xmx, 6).forEach(function (v) { if (v < xmn || v > xmx) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="#1B1E19"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    niceTicks(ymn, ymx, 6).forEach(function (v) { if (v < ymn || v > ymx) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    var st = pearson(xs, ys);
+    if (st) {
+      // 95% confidence band for the regression line
+      var mse = st.sse / Math.max(1, st.df), tcrit = 1.96 + 2.4 / Math.max(1, st.df);
+      var up = [], dn = [], steps = 40;
+      for (var i = 0; i <= steps; i++) {
+        var xv = xmn + (xmx - xmn) * i / steps, yv = st.intercept + st.slope * xv;
+        var se = Math.sqrt(mse * (1 / st.n + Math.pow(xv - st.mx, 2) / st.sxx));
+        up.push(sx(xv).toFixed(1) + ',' + sy(yv + tcrit * se).toFixed(1));
+        dn.push(sx(xv).toFixed(1) + ',' + sy(yv - tcrit * se).toFixed(1));
+      }
+      s += '<polygon points="' + up.join(' ') + ' ' + dn.reverse().join(' ') + '" fill="#B9C4AE" fill-opacity="0.45"/>';
+      s += '<line x1="' + sx(xmn).toFixed(1) + '" y1="' + sy(st.intercept + st.slope * xmn).toFixed(1) + '" x2="' + sx(xmx).toFixed(1) + '" y2="' + sy(st.intercept + st.slope * xmx).toFixed(1) + '" stroke="#1B3A6B" stroke-width="2"/>';
+    }
+    pts.forEach(function (p) { s += '<circle cx="' + sx(p.x).toFixed(1) + '" cy="' + sy(p.y).toFixed(1) + '" r="3.6" fill="#3B6D11" fill-opacity="0.55" stroke="#27500A" stroke-width="0.8"/>'; });
+    if (st) s += '<text x="' + (x0 + 10) + '" y="' + (y1 - 12) + '" font-size="14" fill="#1B1E19">R = ' + round(st.r, 3) + ', ' + pTxt(st.p) + ' (n = ' + st.n + ')</text>';
+    return s + '</svg>';
+  }
+  // ---------- ggarrange: combine charts into one page ----------
+  function svgInner(s) { return String(s || '').replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, ''); }
+  function combineCharts(list, cols, noLetters) {
+    if (!list.length) return null;
+    cols = Math.max(1, Math.min(2, cols || 1));
+    var rows = Math.ceil(list.length / cols);
+    var W = CW * cols, H = CH * rows;
+    var s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + W + '" height="' + H + '" fill="#ffffff"/>';
+    var letters = 'ABCDEFGH';
+    list.forEach(function (item, i) {
+      var cx = (i % cols) * CW, cy = Math.floor(i / cols) * CH;
+      s += '<g transform="translate(' + cx + ',' + cy + ')">' + svgInner(item.svg) +
+        (noLetters ? '' : '<text x="16" y="30" font-size="23" font-weight="700" fill="#1B1E19">' + letters[i] + '</text>') + '</g>';
+    });
+    return s + '</svg>';
+  }
+  function svgToPng(svgStr, w, h, filename) {
+    try {
+      var blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+      var url = URL.createObjectURL(blob), img = new Image();
+      img.onload = function () {
+        var sc = 2, cv = document.createElement('canvas'); cv.width = w * sc; cv.height = h * sc;
+        var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        if (cv.toBlob) cv.toBlob(function (b) { downloadBlob(b, filename); toast('PNG 저장됨'); }, 'image/png');
+        else { downloadBlob(new Blob([dataURLtoBytes(cv.toDataURL('image/png'))], { type: 'image/png' }), filename); toast('PNG 저장됨'); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); toast('PNG 변환 실패 · SVG로 저장해 보세요'); };
+      img.src = url;
+    } catch (e) { toast('PNG 저장 실패'); }
+  }
+
+  // ---------- facet (격자 분할) ----------
+  function facetLevels(mode) {
+    var g = curGen(), t = traitById(S.anTrait), out = [];
+    if (mode === 'rep') { var seen = {}; g.lines.forEach(function (l) { var r = l.rep || 1; if (!seen[r]) { seen[r] = 1; out.push({ key: r, name: '반복 ' + r }); } }); out.sort(function (a, b) { return a.key - b.key; }); }
+    else if (mode === 'sel') { out = [{ key: true, name: '선발' }, { key: false, name: '비선발' }]; }
+    else if (mode === 'date') { out = (g.surveyDates || []).map(function (d) { return { key: d, name: d + ' 조사' }; }); }
+    return out;
+  }
+  function lineInFacet(l, mode, key) {
+    if (mode === 'rep') return (l.rep || 1) === key;
+    if (mode === 'sel') return !!l.selected === key;
+    return true;
+  }
+  function facetValues(t, mode, lv) {
+    var g = curGen(), out = [];
+    g.lines.forEach(function (l) {
+      if (!lineInFacet(l, mode, lv.key)) return;
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var dt = mode === 'date' ? lv.key : S.date;
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
+        var v = parseFloat(S.vals[k]); if (!isNaN(v)) out.push(v);
+      }
+    });
+    return out;
+  }
+  function facetPairs(tx, ty, mode, lv) {
+    var g = curGen(), pts = [];
+    g.lines.forEach(function (l) {
+      if (!lineInFacet(l, mode, lv.key)) return;
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var dt = mode === 'date' ? lv.key : S.date;
+        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + dt) : '');
+        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + (ty.series ? ('@' + dt) : '');
+        var xv = parseFloat(S.vals[kx]), yv = parseFloat(S.vals[ky]);
+        if (!isNaN(xv) && !isNaN(yv)) pts.push({ x: xv, y: yv });
+      }
+    });
+    return pts;
+  }
+  function facetBoxGroups(t, gmode, mode, lv) {
+    var g = curGen(), map = {}, order = [];
+    g.lines.forEach(function (l) {
+      if (!lineInFacet(l, mode, lv.key)) return;
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var dt = mode === 'date' ? lv.key : S.date;
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
+        var v = parseFloat(S.vals[k]); if (isNaN(v)) continue;
+        var key = gmode === 'rep' ? ('반복 ' + (l.rep || 1)) : (gmode === 'sel' ? (l.selected ? '선발' : '비선발') : l.label);
+        if (!map[key]) { map[key] = []; order.push(key); }
+        map[key].push(v);
+      }
+    });
+    return order.map(function (k) { return { name: k, vals: map[k] }; });
+  }
+  function buildFacetSVG() {
+    var g = curGen(), t = traitById(S.anTrait), c = S.chart, mode = c.facet;
+    var levels = facetLevels(mode); if (levels.length < 2) return null;
+    var panels = [], i;
+    if (c.type === 'hist') {
+      var sets = levels.map(function (lv) { return { lv: lv, vals: facetValues(t, mode, lv) }; }).filter(function (s) { return s.vals.length; });
+      if (sets.length < 2) return null;
+      var all = []; sets.forEach(function (s) { all = all.concat(s.vals); });
+      var mn = Math.min.apply(null, all), mx = Math.max.apply(null, all); if (mn === mx) { mn -= 0.5; mx += 0.5; }
+      var k = Math.max(5, Math.min(20, Math.ceil(Math.sqrt(all.length / sets.length))));
+      var bw = (mx - mn) / k, ymax = 0;
+      sets.forEach(function (s) { var b = new Array(k).fill(0); s.vals.forEach(function (v) { b[Math.min(k - 1, Math.max(0, Math.floor((v - mn) / bw)))]++; }); ymax = Math.max(ymax, Math.max.apply(null, b)); });
+      var dom = { mn: mn, mx: mx, k: k, ymax: ymax };
+      sets.forEach(function (s) { panels.push({ svg: chartHistogram(s.vals, t.name, t.unit || (t.type === 'ratio' ? '%' : ''), s.lv.name, dom), name: s.lv.name }); });
+    } else if (c.type === 'box') {
+      var gm = c.group || 'rep';
+      if (gm === mode) gm = (mode === 'rep') ? 'sel' : 'rep';   // 격자 기준과 같으면 다른 축으로 묶기
+      var gsets = levels.map(function (lv) { return { lv: lv, groups: facetBoxGroups(t, gm, mode, lv) }; }).filter(function (s) { return s.groups.length; });
+      if (gsets.length < 2) return null;
+      var av = []; gsets.forEach(function (s) { s.groups.forEach(function (gr) { av = av.concat(gr.vals); }); });
+      var bmn = Math.min.apply(null, av), bmx = Math.max.apply(null, av), bpad = (bmx - bmn) * 0.12 || 1;
+      var bdom = { lo: bmn - bpad, hi: bmx + bpad * 1.6 };
+      var glab = gm === 'rep' ? '반복' : (gm === 'sel' ? '선발 여부' : '조합·계통');
+      gsets.forEach(function (s) { var gr = s.groups.length > 12 ? s.groups.slice(0, 12) : s.groups; panels.push({ svg: chartBox(gr, t.name, t.unit || (t.type === 'ratio' ? '%' : ''), s.lv.name, glab, bdom), name: s.lv.name }); });
+    } else {
+      var tx = traitById(c.x), ty = traitById(c.y); if (!tx || !ty || tx.id === ty.id) return null;
+      var psets = levels.map(function (lv) { return { lv: lv, pts: facetPairs(tx, ty, mode, lv) }; }).filter(function (s) { return s.pts.length >= 3; });
+      if (psets.length < 2) return null;
+      var ax = [], ay = []; psets.forEach(function (s) { s.pts.forEach(function (p) { ax.push(p.x); ay.push(p.y); }); });
+      var xmn = Math.min.apply(null, ax), xmx = Math.max.apply(null, ax), ymn = Math.min.apply(null, ay), ymx = Math.max.apply(null, ay);
+      var xp = (xmx - xmn) * 0.08 || 1, yp = (ymx - ymn) * 0.12 || 1;
+      var sdom = { xmn: xmn - xp, xmx: xmx + xp, ymn: ymn - yp, ymx: ymx + yp * 1.4 };
+      psets.forEach(function (s) { panels.push({ svg: chartScatter(s.pts, tx.name, tx.unit || '', ty.name, ty.unit || '', s.lv.name, sdom), name: s.lv.name }); });
+    }
+    panels = panels.filter(function (p) { return p.svg; });
+    if (panels.length < 2) return null;
+    return combineCharts(panels, panels.length > 2 ? 2 : 2, true);
+  }
+
+  function pairedPoints(tx, ty) {
+    var g = curGen(), pts = [];
+    g.lines.forEach(function (l) {
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + S.date) : '');
+        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + (ty.series ? ('@' + S.date) : '');
+        var xv = parseFloat(S.vals[kx]), yv = parseFloat(S.vals[ky]);
+        if (!isNaN(xv) && !isNaN(yv)) pts.push({ x: xv, y: yv });
+      }
+    });
+    return pts;
+  }
+  function boxGroups(t, mode) {
+    var g = curGen(), map = {}, order = [];
+    g.lines.forEach(function (l) {
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : '');
+        var v = parseFloat(S.vals[k]); if (isNaN(v)) continue;
+        var key = mode === 'rep' ? ('반복 ' + (l.rep || 1)) : (mode === 'sel' ? (l.selected ? '선발' : '비선발') : l.label);
+        if (!map[key]) { map[key] = []; order.push(key); }
+        map[key].push(v);
+      }
+    });
+    return order.map(function (k) { return { name: k, vals: map[k] }; });
+  }
+  function currentChartSVG() {
+    var g = curGen(), t = traitById(S.anTrait), c = S.chart;
+    if (c.facet && c.facet !== 'none') { var fs2 = buildFacetSVG(); if (fs2) return fs2; }
+    var title = g.projName + ' · ' + g.label + (t.series ? ' (' + S.date + ')' : '');
+    if (c.type === 'hist') {
+      var vals = [];
+      anGather(t).forEach(function (o) { o.vals.forEach(function (v) { var n = parseFloat(v); if (!isNaN(n)) vals.push(n); }); });
+      return chartHistogram(vals, t.name, traitUnit(t) === 'index' ? 'index' : (t.unit || (t.type === 'ratio' ? '%' : '')), title);
+    }
+    if (c.type === 'box') {
+      var mode = c.group || 'rep', groups = boxGroups(t, mode);
+      if (groups.length > 12) groups = groups.slice(0, 12);
+      return chartBox(groups, t.name, t.unit || (t.type === 'ratio' ? '%' : ''), title, mode === 'rep' ? '반복' : (mode === 'sel' ? '선발 여부' : '조합·계통'));
+    }
+    var tx = traitById(c.x), ty = traitById(c.y);
+    if (!tx || !ty || tx.id === ty.id) return null;
+    return chartScatter(pairedPoints(tx, ty), tx.name, tx.unit || (tx.type === 'ratio' ? '%' : ''), ty.name, ty.unit || (ty.type === 'ratio' ? '%' : ''), title);
+  }
+  function renderChartPanel(body, t, byLine) {
+    var g = curGen(), meas = g.traits.filter(isMeasure);
+    if (!S.chart) S.chart = { type: 'hist', group: 'rep', x: null, y: null };
+    var c = S.chart;
+    if (!c.x || !traitById(c.x)) c.x = (meas[0] || {}).id;
+    if (!c.y || !traitById(c.y)) c.y = (meas[1] || meas[0] || {}).id;
+    var types = [['hist', '히스토그램'], ['box', '박스플롯'], ['scatter', '산점도']];
+    var opts = '';
+    if (c.type === 'box') {
+      opts = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-secondary)">그룹</span>' +
+        [['rep', '반복'], ['sel', '선발 여부'], ['line', '조합·계통']].map(function (m) { return '<button class="btn chGrp" data-m="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.group || 'rep') === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
+    } else if (c.type === 'scatter') {
+      var sel = function (id, cur) { return '<select class="ein ' + id + '" style="height:36px;font-size:12px;flex:1">' + meas.map(function (m) { return '<option value="' + m.id + '"' + (m.id === cur ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') + '</select>'; };
+      opts = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px"><span style="font-size:11px;color:var(--text-secondary);flex:0 0 18px">X</span>' + sel('chX', c.x) + '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 18px">Y</span>' + sel('chY', c.y) + '</div>';
+    }
+    var set = S.chartSet || (S.chartSet = []);
+    var setHtml = '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:12px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">그래프 모음 <span style="color:var(--text-muted);font-weight:400">· 여러 장을 한 페이지로</span></span><span style="font-size:12px;color:#3B6D11;font-weight:600">' + set.length + '장</span></div>' +
+      '<button class="btn" id="chAdd" style="width:100%;height:44px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('plus', 'var(--text-primary)', 16) + ' 현재 그래프 담기</button>';
+    if (set.length) {
+      setHtml += '<div style="margin-top:8px">' + set.map(function (it, i) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--surface-1);border-radius:9px;margin-bottom:6px"><span style="font-size:13px;font-weight:700;color:#27500A;width:16px">' + 'ABCDEFGH'[i] + '</span><span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.name) + '</span><button class="btn chDel" data-i="' + i + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 14) + '</button></div>';
+      }).join('') + '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="font-size:11px;color:var(--text-secondary)">배치</span>' +
+          [[1, '세로 1열'], [2, '2열 격자']].map(function (m) { return '<button class="btn chCols" data-c="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((S.chartCols || 2) === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="chArrPng" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 PNG</button><button class="btn" id="chArrSvg" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 SVG</button><button class="btn" id="chClear" style="flex:0 0 74px;height:44px;font-size:13px;color:#C0392B;border-color:#E3B4AE">비우기</button></div>' +
+        '<div id="chArrPrev" style="margin-top:10px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:#fff"></div>';
+    }
+    setHtml += '</div>';
+    var facetOpts = [['none', '없음'], ['rep', '반복별'], ['sel', '선발 여부']];
+    if (t.series && (g.surveyDates || []).length > 1) facetOpts.push(['date', '조사일별']);
+    var facetHtml = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-secondary)">격자 분할</span>' +
+      facetOpts.map(function (m) { return '<button class="btn chFac" data-f="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.facet || 'none') === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
+    body.innerHTML =
+      '<div style="display:flex;gap:8px">' + types.map(function (ty2) { return '<button class="btn chType" data-t="' + ty2[0] + '" style="flex:1;height:40px;font-size:13px' + (c.type === ty2[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + ty2[1] + '</button>'; }).join('') + '</div>' +
+      opts + facetHtml +
+      '<div id="chWrap" style="margin-top:12px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:#fff"></div>' +
+      '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="chPng" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' PNG 저장</button><button class="btn" id="chSvg" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' SVG 저장</button></div>' +
+      setHtml +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">논문용 스타일(흰 배경·검은 축)로 그립니다. 히스토그램은 평균선, 박스플롯은 ANOVA·t검정 p값, 산점도는 회귀선·95% 신뢰구간과 상관계수 R·p를 표시합니다.' + (c.type === 'box' && (c.group || 'rep') === 'line' ? ' 계통이 많으면 앞 12개만 표시됩니다.' : '') + '</div>';
+    var svg = null;
+    try { svg = currentChartSVG(); } catch (e) { svg = null; }
+    $('chWrap').innerHTML = svg ? '<div style="min-width:520px">' + svg.replace(/width="\d+" height="\d+"/, 'width="100%" height="auto"') + '</div>'
+      : '<div style="padding:36px 12px;text-align:center;color:var(--text-muted);font-size:13px">그릴 데이터가 부족합니다' + (c.type === 'scatter' ? '<br>두 형질에 모두 값이 있는 개체가 3개 이상 필요합니다.' : '') + '</div>';
+    document.querySelectorAll('.chType').forEach(function (b) { b.onclick = function () { c.type = b.getAttribute('data-t'); renderAnBody(); }; });
+    document.querySelectorAll('.chFac').forEach(function (b) { b.onclick = function () { c.facet = b.getAttribute('data-f'); renderAnBody(); }; });
+    document.querySelectorAll('.chGrp').forEach(function (b) { b.onclick = function () { c.group = b.getAttribute('data-m'); renderAnBody(); }; });
+    var xs = document.querySelector('.chX'), ys = document.querySelector('.chY');
+    if (xs) xs.onchange = function () { c.x = xs.value; renderAnBody(); };
+    if (ys) ys.onchange = function () { c.y = ys.value; renderAnBody(); };
+    $('chPng').onclick = function () { saveChart('png'); };
+    $('chSvg').onclick = function () { saveChart('svg'); };
+    $('chAdd').onclick = function () {
+      var sv = null; try { sv = currentChartSVG(); } catch (e) {}
+      if (!sv) { toast('담을 그래프가 없습니다'); return; }
+      if (S.chartSet.length >= 8) { toast('최대 8장까지 담을 수 있습니다'); return; }
+      S.chartSet.push({ svg: sv, name: chartLabelName() });
+      toast('담김 · 총 ' + S.chartSet.length + '장'); renderAnBody();
+    };
+    document.querySelectorAll('.chDel').forEach(function (b) { b.onclick = function () { S.chartSet.splice(+b.getAttribute('data-i'), 1); renderAnBody(); }; });
+    document.querySelectorAll('.chCols').forEach(function (b) { b.onclick = function () { S.chartCols = +b.getAttribute('data-c'); renderAnBody(); }; });
+    if ($('chClear')) $('chClear').onclick = function () { S.chartSet = []; renderAnBody(); };
+    if ($('chArrPrev')) {
+      var cols = S.chartCols || 2, comb = combineCharts(S.chartSet, cols);
+      var rowsN = Math.ceil(S.chartSet.length / Math.min(2, cols));
+      $('chArrPrev').innerHTML = comb ? '<div style="min-width:520px">' + comb.replace(/width="\d+" height="\d+"/, 'width="100%" height="auto"') + '</div>' : '';
+      if ($('chArrPng')) $('chArrPng').onclick = function () { svgToPng(comb, CW * Math.min(2, cols), CH * rowsN, arrangeFileName('png')); };
+      if ($('chArrSvg')) $('chArrSvg').onclick = function () { downloadBlob(new Blob([comb], { type: 'image/svg+xml;charset=utf-8' }), arrangeFileName('svg')); toast('SVG 저장됨'); };
+    }
+  }
+  function chartLabelName() {
+    var t = traitById(S.anTrait), c = S.chart;
+    if (c.type === 'hist') return t.name + ' 히스토그램';
+    if (c.type === 'box') return t.name + ' 박스플롯 (' + ((c.group || 'rep') === 'rep' ? '반복' : (c.group === 'sel' ? '선발' : '계통')) + ')';
+    return (traitById(c.x) || {}).name + ' vs ' + (traitById(c.y) || {}).name + ' 산점도';
+  }
+  function arrangeFileName(ext) {
+    var g = curGen();
+    return safeName(g.projName) + '_' + safeName(g.label) + '_arrange' + S.chartSet.length + '_' + ymd() + '.' + ext;
+  }
+  function chartFileName(ext) {
+    var g = curGen(), t = traitById(S.anTrait), c = S.chart;
+    var kind = (c.type === 'hist' ? 'histogram' : (c.type === 'box' ? 'boxplot' : 'scatter')) + ((c.facet && c.facet !== 'none') ? '-facet-' + c.facet : '');
+    var nm = c.type === 'scatter' ? (safeName((traitById(c.x) || {}).name) + '-' + safeName((traitById(c.y) || {}).name)) : safeName(t.name);
+    return safeName(g.projName) + '_' + safeName(g.label) + '_' + nm + '_' + kind + '_' + ymd() + '.' + ext;
+  }
+  function saveChart(kind) {
+    var svg = null;
+    try { svg = currentChartSVG(); } catch (e) {}
+    if (!svg) { toast('저장할 그래프가 없습니다'); return; }
+    if (kind === 'svg') { downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), chartFileName('svg')); toast('SVG 저장됨'); return; }
+    try {
+      var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      var url = URL.createObjectURL(blob), img = new Image();
+      img.onload = function () {
+        var sc = 2, cv = document.createElement('canvas'); cv.width = CW * sc; cv.height = CH * sc;
+        var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        cv.toBlob ? cv.toBlob(function (b) { downloadBlob(b, chartFileName('png')); toast('PNG 저장됨'); }, 'image/png')
+                  : (function () { downloadBlob(new Blob([dataURLtoBytes(cv.toDataURL('image/png'))], { type: 'image/png' }), chartFileName('png')); toast('PNG 저장됨'); })();
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); toast('PNG 변환 실패 · SVG로 저장해 보세요'); };
+      img.src = url;
+    } catch (e) { toast('PNG 저장 실패'); }
+  }
+
   // ---------- ANALYSIS ----------
   function isMeasure(t) { return t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter' || (t.type === 'rating' && t.scale && typeof t.scale[0] === 'number'); }
   function renderAnalysis() {
     var g = curGen(), v = $('view-analysis');
     if (!traitById(S.anTrait)) S.anTrait = g.traits[0].id;
-    var t = traitById(S.anTrait);
+    if (!S.anTab) S.anTab = 'stat';
     v.innerHTML =
       '<div style="padding:14px 16px 8px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">분석</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + ' · ' + esc(g.crop) + '</div></div>' +
+      '<div style="display:flex;gap:8px;padding:10px 14px 2px">' +
+        '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">요약 · 통계</button>' +
+        '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">그래프 생성</button>' +
+      '</div>' +
       '<div class="scroll-x" id="anPills" style="padding:10px 14px 6px"></div>' +
       '<div id="anDate" style="padding:0 14px 4px"></div>' +
       '<div id="anBody" style="flex:1;padding:8px 14px 16px;overflow:auto"></div>';
+    document.querySelectorAll('.anTab').forEach(function (b) { b.onclick = function () { S.anTab = b.getAttribute('data-t'); renderAnalysis(); }; });
     renderAnPills(); renderAnDate(); renderAnBody();
   }
   function renderAnPills() {
@@ -1082,6 +1567,7 @@
     var t = traitById(S.anTrait), body = $('anBody');
     var byLine = anGather(t);
     var total = byLine.reduce(function (a, b) { return a + b.vals.length; }, 0);
+    if (S.anTab === 'chart') { renderChartPanel(body, t, byLine); return; }
     if (total === 0) { body.innerHTML = '<div style="padding:30px 10px;text-align:center;color:var(--text-muted)">이 형질의 입력값이 없습니다' + (t.series ? ' (' + S.date + ' 조사)' : '') + '<br><span style="font-size:12px">조사 탭에서 값을 입력하면 여기에 통계가 나타납니다.</span></div>'; return; }
     if (isMeasure(t)) renderMeasure(body, t, byLine); else renderCategory(body, t, byLine);
   }
