@@ -78,6 +78,11 @@ function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents || '{}');
     if (SYNC_TOKEN && body.token !== SYNC_TOKEN) return json_({ok:false, error:'unauthorized'});
+
+    // ===== 드라이브 저장 (CropMemo / 과제명 / …) =====
+    if (body.action === 'driveCsv')  return json_(saveCsvToDrive_(body));
+    if (body.action === 'driveFile') return json_(saveFileToDrive_(body));
+
     var batch = body.batch || [];
     var applied = 0, skipped = 0;
     // 테이블별로 묶어 처리(시트 접근 최소화)
@@ -216,6 +221,53 @@ function findGenLabel_(genId) {
 }
 
 // ===== 응답 유틸 =====
+
+/*************************************************************************
+ * 드라이브 저장 — CropMemo / <과제명> / 파일
+ *  - 폴더가 없으면 자동 생성
+ *  - CSV: 같은 이름 파일이 있으면 내용을 덮어씀(중복 생성 방지)
+ *  - 사진/그림: 같은 이름이 있으면 건너뜀
+ *************************************************************************/
+var DRIVE_ROOT = 'CropMemo';
+
+function folder_(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+function projFolder_(projName) {
+  var root = folder_(DriveApp.getRootFolder(), DRIVE_ROOT);
+  return folder_(root, sanitizeName_(projName || '무제'));
+}
+function sanitizeName_(s) {
+  return String(s == null ? '' : s).replace(/[\\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || '무제';
+}
+
+// CSV 저장 (앱의 'CSV 내보내기'와 동일한 파일명·내용, UTF-8 BOM)
+function saveCsvToDrive_(body) {
+  var name = sanitizeName_(body.fileName || 'export.csv');
+  var csv  = String(body.csv || '');
+  if (!csv) return { ok:false, error:'empty csv' };
+  var fol  = projFolder_(body.proj);
+  var blob = Utilities.newBlob('\uFEFF' + csv, 'text/csv', name);
+  var it   = fol.getFilesByName(name), file;
+  if (it.hasNext()) { file = it.next(); file.setContent('\uFEFF' + csv); }   // 덮어쓰기
+  else              { file = fol.createFile(blob); }
+  return { ok:true, id:file.getId(), name:name, folder:fol.getName(), url:file.getUrl() };
+}
+
+// 사진·그림 저장 (base64) — 파일명: 과제명_라벨번호_개체번호_형질_촬영일자.jpg
+function saveFileToDrive_(body) {
+  var name = sanitizeName_(body.fileName || ('img_' + Date.now() + '.jpg'));
+  var b64  = String(body.dataB64 || '');
+  if (!b64) return { ok:false, error:'empty file' };
+  var fol  = projFolder_(body.proj);
+  var it   = fol.getFilesByName(name);
+  if (it.hasNext()) return { ok:true, skipped:true, name:name };   // 이미 있음
+  var blob = Utilities.newBlob(Utilities.base64Decode(b64), body.mime || 'image/jpeg', name);
+  var file = fol.createFile(blob);
+  return { ok:true, id:file.getId(), name:name, folder:fol.getName(), url:file.getUrl() };
+}
+
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }

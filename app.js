@@ -169,6 +169,29 @@
   }
 
   // ---------- sync (Google Apps Script) ----------
+  function postSync(url, payload) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
+  }
+  async function syncDrive(url, g, silent) {
+    var auth = { deviceId: S.settings.deviceId, token: S.settings.token || '' };
+    var built = await buildCSV(g);
+    if (built) {
+      await postSync(url, Object.assign({ action: 'driveCsv', proj: g.projName, fileName: built.name, csv: built.csv }, auth));
+    }
+    // upload images that haven't been sent yet
+    var sentMap = await kvGet('imgSynced') || {};
+    var files = await collectGenImages(g);
+    var pending = files.filter(function (f) { return !sentMap[f.name]; });
+    for (var i = 0; i < pending.length; i++) {
+      var f = pending[i];
+      if (!silent) toast('사진 전송 ' + (i + 1) + '/' + pending.length);
+      try {
+        var r = await postSync(url, Object.assign({ action: 'driveFile', proj: g.projName, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
+        if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); }
+      } catch (e) { break; }
+    }
+    return { csv: built ? built.name : null, images: pending.length };
+  }
   async function trySync(silent) {
     var url = S.settings.syncUrl;
     if (!url) { if (!silent) toast('설정에서 동기화 URL을 입력하세요'); return; }
@@ -181,16 +204,18 @@
     dirty.forEach(function (r) {
       batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
     });
-    if (!dirty.length) { if (!silent) toast('전송할 변경분이 없습니다'); return; }
     S.syncing = true; renderCurrent();
     try {
-      var res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ deviceId: S.settings.deviceId, token: S.settings.token || '', batch: batch }) });
-      var j = await res.json();
-      if (j && j.ok) {
+      var applied = 0;
+      if (dirty.length) {
+        var j = await postSync(url, { deviceId: S.settings.deviceId, token: S.settings.token || '', batch: batch });
+        if (!j || !j.ok) { if (!silent) toast('동기화 실패 · 서버 응답 오류'); return; }
+        applied = j.applied || 0;
         for (var i = 0; i < dirty.length; i++) { dirty[i].dirty = 0; await obsPut(dirty[i]); }
-        S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
-        if (!silent) toast('동기화 완료 · ' + (j.applied || 0) + '건 반영');
-      } else { if (!silent) toast('동기화 실패 · 서버 응답 오류'); }
+      }
+      var dr = await syncDrive(url, g, silent);
+      S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
+      if (!silent) toast('동기화 완료 · 시트 ' + applied + '건' + (dr.csv ? ' · CSV 저장' : '') + (dr.images ? ' · 사진 ' + dr.images + '장' : ''));
     } catch (e) {
       if (!silent) toast('동기화 실패 · 연결/URL 확인');
     } finally { S.syncing = false; updatePending(); renderCurrent(); }
@@ -203,22 +228,45 @@
   }
 
   // ---------- CSV export ----------
-  async function exportCSV() {
-    var g = curGen(), all = await obsAll(), recs = all.filter(function (r) { return r.genId === g.id; });
-    var lineById = {}; g.lines.forEach(function (l) { lineById[l.id] = l; });
-    var rows = [['라벨번호', '세대', '반복', '개체', '조사일', '형질', '값', '개체선발', '계통선발']];
-    recs.forEach(function (r) {
-      var l = lineById[r.lineId] || {}, t = traitById(r.traitId);
-      rows.push([l.label || r.lineId, g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
+  function traitUnit(t) {
+    if (!t) return '';
+    if (t.type === 'ratio') return '%';
+    if (t.type === 'rating') return 'index';
+    if (t.type === 'counter') return '개';
+    if (t.type === 'categorical') return '항목';
+    if (t.type === 'date') return '날짜';
+    if (t.type === 'text') return '사용자 기입';
+    return t.unit || '';
+  }
+  async function buildCSV(g) {
+    var all = await obsAll(), recs = all.filter(function (r) { return r.genId === g.id; });
+    if (!recs.length) return null;
+    var lineById = {}, lineOrder = {};
+    g.lines.forEach(function (l, i) { lineById[l.id] = l; lineOrder[l.id] = i; });
+    recs.sort(function (a, b) {
+      var la = lineOrder[a.lineId] == null ? 9e9 : lineOrder[a.lineId], lb = lineOrder[b.lineId] == null ? 9e9 : lineOrder[b.lineId];
+      if (la !== lb) return la - lb;
+      if (a.indiv !== b.indiv) return a.indiv - b.indiv;
+      if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
+      return String(a.traitId) < String(b.traitId) ? -1 : 1;
     });
-    if (recs.length === 0) { toast('내보낼 데이터가 없습니다'); return; }
+    var rows = [['No.', '라벨번호', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '개체 선발', '조합, 계통 선발']];
+    recs.forEach(function (r, i) {
+      var l = lineById[r.lineId] || {}, t = traitById(r.traitId);
+      var val = (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value;
+      rows.push([i + 1, l.label || r.lineId, l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
+    });
     var csv = rows.map(function (row) { return row.map(function (c) { c = (c == null ? '' : String(c)); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
-    var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
-    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'cropmemo_' + g.label + '_' + todayStr().replace('/', '-') + '.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500);
-    toast('CSV ' + recs.length + '행 내보냄');
+    var used = [];
+    recs.forEach(function (r) { var l = lineById[r.lineId]; if (l && used.indexOf(l.label) < 0) used.push(l.label); });
+    var first = used[0] || '', last = used[used.length - 1] || '';
+    return { name: safeName(g.projName) + '_' + safeName(first) + '-' + safeName(last) + '_' + ymd() + '.csv', csv: csv, rows: recs.length };
+  }
+  async function exportCSV() {
+    var g = curGen(), built = await buildCSV(g);
+    if (!built) { toast('내보낼 데이터가 없습니다'); return; }
+    downloadBlob(new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), built.name);
+    toast('CSV ' + built.rows + '행 내보냄');
   }
 
   // ---------- routing ----------
@@ -280,11 +328,13 @@
         '<button class="btn" id="wClose" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('x', 'var(--text-primary)', 18) + '</button>' +
         '<div style="flex:1"><div style="font-size:15px;font-weight:600">새 과제 생성</div><div style="font-size:11px;color:var(--text-muted)">' + w.step + ' / 3 · ' + names[w.step - 1] + '</div></div></div>' +
       '<div style="display:flex;gap:6px;padding:12px 14px 4px">' + [1, 2, 3].map(function (n) { return '<div style="flex:1;text-align:center"><div style="height:5px;border-radius:3px;background:' + (n <= w.step ? '#639922' : 'var(--border)') + '"></div><div style="font-size:10px;margin-top:5px;color:' + (n === w.step ? '#27500A' : 'var(--text-muted)') + '">' + n + '. ' + names[n - 1] + '</div></div>'; }).join('') + '</div>' +
-      '<div style="flex:1;padding:8px 16px 12px;overflow:auto">' + body + '</div>' +
+      '<div style="flex:1;padding:8px 16px 12px;overflow:auto" id="wBody">' + body + '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
         '<div id="wHint" style="font-size:11px;color:#B0721A;margin-bottom:8px;display:none"></div>' +
+        (w.step === 3 ? wizSummary(w) : '') +
         '<div style="display:flex;gap:10px">' + (w.step > 1 ? '<button class="btn" id="wPrev" style="flex:0 0 90px;height:48px;font-size:14px">이전</button>' : '') +
           '<button class="btn primary" id="wNext" style="flex:1;height:48px;font-size:15px">' + (w.step < 3 ? '다음' : '과제 생성') + '</button></div></div>';
+    var bodyEl = $('wBody'); if (bodyEl && S._wizScroll != null) bodyEl.scrollTop = S._wizScroll;
     wireNew(w);
   }
   function stepInfo(w) {
@@ -295,9 +345,8 @@
       '<input class="ein" id="wName" style="margin-top:6px" placeholder="예) 오이 내병성 육종" value="' + esc(w.name) + '">' +
       '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px">' + chips + '</div>' + addForm +
-      '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">라벨 접두어 <span style="color:var(--text-muted);font-weight:400">(연도)</span></label>' +
-      '<div style="display:flex;gap:8px;align-items:center"><input class="ein" id="wPre" style="flex:0 0 110px;text-align:center;font-size:16px;font-weight:600" placeholder="' + yy() + '" value="' + esc(w.prefix) + '">' +
-      [yy(), String(+yy() + 1)].map(function (y) { return '<button class="btn wyear" data-y="' + y + '" style="height:44px;padding:0 14px;font-size:13px' + (w.prefix === y ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + y + '년</button>'; }).join('') + '</div>' +
+      '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">라벨 접두어 <span style="color:var(--text-muted);font-weight:400">(연도 · 모든 작물 공통)</span></label>' +
+      '<input class="ein" id="wPre" style="width:120px;text-align:center;font-size:16px;font-weight:600" placeholder="' + yy() + '" value="' + esc(w.prefix) + '">' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + ico('info-circle', 'var(--text-muted)', 13) + ' 라벨번호 예시: <b id="wPrePrev">' + esc(w.prefix || yy()) + '</b>-#### <span style="color:var(--text-muted)">(#### = 라벨·엑셀 값 그대로, 자릿수 고정 아님)</span></div>' +
       '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">목표 · 설명 (선택)</label>' +
       '<textarea class="ein" id="wGoal" style="height:64px;padding:9px 12px;resize:none" placeholder="예) 노균병·흰가루병 복합저항 계통 육성">' + esc(w.goal) + '</textarea>';
@@ -318,17 +367,21 @@
       if (w.rows && w.rows.length) {
         var prev = w.rows.slice(0, 8);
         bodyHtml = '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">' + esc(w.fileName) + ' · <b style="color:var(--text-primary)">' + w.rows.length + '개</b> 라벨 인식' + (w.rows.length > 8 ? ' (앞 8개)' : '') + '</div>' +
+          (w.fromOCR ? '<div style="font-size:11px;color:#8A5A12;background:#FAEEDA;border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.5">' + ico('info-circle', '#B0721A', 12) + ' 사진·스캔에서 인식한 결과입니다. 라벨이 맞는지 확인하세요(0↔O, 1↔I 혼동 주의). 등록 후 과제 수정 화면에서 고칠 수 있습니다.</div>' : '') +
           '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:6px 9px">#</th><th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:center;padding:6px 9px">세대</th><th style="text-align:center;padding:6px 9px">반복</th><th style="text-align:center;padding:6px 9px">개체</th></tr></thead><tbody>' +
           prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:5px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:5px 9px;text-align:center">' + esc(r.gen || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wFileReset" style="flex:0 0 100px;height:40px;font-size:13px">다시 선택</button><div style="flex:1;display:flex;align-items:center;font-size:11px;color:var(--text-muted)">세대 열이 없으면 아래 세대로 등록됩니다</div></div>' +
           (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + GEN_ORDER.map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + g + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + g + '</button>'; }).join('') + '</div></div>') +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">개체 수가 없는 행은 <b>' + w.indiv + '</b>개로 등록됩니다. <input class="ein" id="wIndiv" type="number" style="width:70px;height:32px;display:inline-block;vertical-align:middle;margin-left:4px" value="' + w.indiv + '"></div>';
       } else {
-        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 .xlsx · CSV)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
+        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
           '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,세대,반복,개체수\n' + esc(w.prefix || yy()) + '-0001,F3,1,10\n' + esc(w.prefix || yy()) + '-0002,F3,2,10</div></div>' +
           '<button class="btn" id="wTpl" style="width:100%;height:44px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
-          '<button class="btn primary" id="wPick" style="width:100%;height:50px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 엑셀·CSV 파일 선택</button>' +
-          '<input type="file" id="wFile" accept=".xlsx,.xls,.csv,.tsv,.txt" style="display:none">';
+          '<button class="btn primary" id="wPick" style="width:100%;height:50px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
+          '<button class="btn" id="wShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +
+          '<input type="file" id="wFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" style="display:none">' +
+          '<input type="file" id="wCam" accept="image/*" capture="environment" style="display:none">' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">엑셀·CSV가 가장 정확합니다. 종이 표를 촬영하거나 PDF를 넣으면 <b>한글 머리글(라벨번호·세대·반복·개체수)</b>을 읽어 열을 맞춰 채웁니다(인쇄된 표 기준). 인식 결과는 미리보기에서 확인한 뒤 등록하고, 과제 수정 화면에서 고칠 수 있습니다.</div>';
       }
     }
     return tabs + bodyHtml +
@@ -344,13 +397,22 @@
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : ''));
       return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:0.5px solid var(--border)"><div style="flex:1;font-size:13px;font-weight:500;color:' + (on ? 'var(--text-primary)' : 'var(--text-muted)') + '">' + esc(t.name) + (tag ? ' <span style="font-size:10px;color:var(--text-muted);border:0.5px solid var(--border);border-radius:5px;padding:1px 5px">' + esc(tag) + '</span>' : '') + '</div><div class="sw wtoggle' + (on ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div>';
     }).join('');
+    return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + wizGenList(w).join('·') + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
+      '<div>' + rows + '</div>';
+  }
+  function wizSummary(w) {
+    var set = wizTraitSet(w.crop);
     var active = set.filter(function (t, i) { return !w.traitOff[i]; }).length;
-    var gls = wizGenList(w), nG = gls.length, gl = gls.join('·');
-    var nLines = (w.src === 'file' && w.rows) ? w.rows.length : w.lines;
-    var tot = (w.src === 'file' && w.rows) ? w.rows.reduce(function (a, r) { return a + (r.indiv || w.indiv); }, 0) * (wizFileGens(w).length ? 1 : nG) : w.lines * w.indiv * nG;
-    return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + gl + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
-      '<div style="max-height:230px;overflow:auto">' + rows + '</div>' +
-      '<div class="card" style="margin-top:14px;background:#EAF3DE"><div style="font-size:12px;color:#3B6D11;font-weight:600;margin-bottom:6px">' + ico('checks', '#3B6D11', 14) + ' 생성 요약</div><div style="font-size:13px;color:#27500A;line-height:1.7">과제 <b>' + esc(w.name || '(이름 없음)') + '</b> · <b>' + esc(w.crop) + '</b><br>등록 방식 <b>' + (w.src === 'file' ? '엑셀·CSV (' + esc(w.fileName || '파일') + ')' : '시험구 임의 생성') + '</b><br>세대 <b>' + gl + '</b> (' + nG + '개)<br>계통 <b>' + nLines + '</b>' + (w.src === 'file' ? '' : ' × 개체 <b>' + w.indiv + '</b>') + (w.rcbd ? ' · 반복 <b>' + w.reps + '</b>' : '') + '<br>총 <b>' + tot + '</b>개체 · 형질 <b>' + active + '</b>개 · 라벨 <b>' + esc(w.prefix) + '-####</b></div></div>';
+    var gls = wizGenList(w), nG = gls.length, byFile = wizFileGens(w).length > 0;
+    var labels, indivs;
+    if (w.src === 'file' && w.rows && w.rows.length) {
+      labels = byFile ? w.rows.length : w.rows.length * nG;
+      indivs = w.rows.reduce(function (a, r) { return a + (r.indiv || w.indiv); }, 0) * (byFile ? 1 : nG);
+    } else { labels = w.lines * nG; indivs = w.lines * w.indiv * nG; }
+    return '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+      '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + labels + '</div><div style="font-size:11px;color:#3B6D11">총 라벨번호</div></div>' +
+      '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + indivs + '</div><div style="font-size:11px;color:#3B6D11">총 개체수</div></div>' +
+      '<div style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700">' + active + '</div><div style="font-size:11px;color:var(--text-muted)">형질</div></div></div>';
   }
   function wizBlock(w) {
     if (w.step === 1) { if (!(w.name || '').trim()) return '과제명을 입력하세요.'; if (!w.crop) return '작물을 선택하세요.'; if (!(w.prefix || '').trim()) return '라벨 접두어(연도)를 입력하세요.'; }
@@ -369,20 +431,19 @@
   }
   function wireNew(w) {
     $('wClose').onclick = function () { if (confirm('작성 중인 내용을 취소할까요?')) { S.wiz = null; go('home'); } };
-    if ($('wPrev')) $('wPrev').onclick = function () { w.step--; renderNew(); };
-    $('wNext').onclick = function () { var r = wizBlock(w); if (r) { var h = $('wHint'); h.textContent = r; h.style.display = 'block'; return; } if (w.step < 3) { w.step++; renderNew(); } else createProject(); };
+    if ($('wPrev')) $('wPrev').onclick = function () { S._wizScroll = 0; w.step--; renderNew(); };
+    $('wNext').onclick = function () { var r = wizBlock(w); if (r) { var h = $('wHint'); h.textContent = r; h.style.display = 'block'; return; } if (w.step < 3) { S._wizScroll = 0; w.step++; renderNew(); } else createProject(); };
     if (w.step === 1) {
       $('wName').oninput = function () { w.name = this.value; };
-      document.querySelectorAll('.wcrop').forEach(function (b) { b.onclick = function () { w.crop = b.getAttribute('data-c'); var m = wizCropMeta(w.crop); if (!w.prefixEdited && m) w.prefix = m.prefix; w.traitOff = {}; renderNew(); }; });
+      document.querySelectorAll('.wcrop').forEach(function (b) { b.onclick = function () { w.crop = b.getAttribute('data-c'); w.traitOff = {}; renderNew(); }; });
       $('wAddCrop').onclick = function () { w.adding = true; w.nc = { name: '', prefix: '' }; renderNew(); };
       $('wPre').oninput = function () { w.prefix = this.value.replace(/[^0-9A-Za-z\-]/g, ''); w.prefixEdited = true; var p = $('wPrePrev'); if (p) p.textContent = w.prefix || yy(); };
-      document.querySelectorAll('.wyear').forEach(function (b) { b.onclick = function () { w.prefix = b.getAttribute('data-y'); w.prefixEdited = true; renderNew(); }; });
       $('wGoal').oninput = function () { w.goal = this.value; };
       if (w.adding) {
         $('wNcName').oninput = function () { w.nc.name = this.value; };
         $('wNcPre').oninput = function () { w.nc.prefix = this.value.toUpperCase(); };
         $('wNcCancel').onclick = function () { w.adding = false; renderNew(); };
-        $('wNcAdd').onclick = function () { var nm = (w.nc.name || '').trim(); if (!nm) { toast('작물명을 입력하세요'); return; } if (!wizCropMeta(nm)) { var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41']; w.crops.push({ name: nm, color: pal[(w.crops.length - 6) % pal.length] || '#6D4C41', prefix: (w.nc.prefix || nm.slice(0, 2)).toUpperCase() }); } var m = wizCropMeta(nm); w.crop = nm; w.prefix = m.prefix; w.prefixEdited = true; w.adding = false; w.traitOff = {}; renderNew(); };
+        $('wNcAdd').onclick = function () { var nm = (w.nc.name || '').trim(); if (!nm) { toast('작물명을 입력하세요'); return; } if (!wizCropMeta(nm)) { var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41']; w.crops.push({ name: nm, color: pal[(w.crops.length - 6) % pal.length] || '#6D4C41', prefix: (w.nc.prefix || nm.slice(0, 2)).toUpperCase() }); } w.crop = nm; w.adding = false; w.traitOff = {}; renderNew(); };
       }
     } else if (w.step === 2) {
       document.querySelectorAll('.wsrc').forEach(function (b) { b.onclick = function () { w.src = b.getAttribute('data-s'); renderNew(); }; });
@@ -395,14 +456,17 @@
       if ($('wFileReset')) $('wFileReset').onclick = function () { w.rows = null; w.fileName = ''; renderNew(); };
       if ($('wTpl')) $('wTpl').onclick = function () { var pf = w.prefix || yy(); var csv = '라벨번호,세대,반복,개체수\r\n' + pf + '-0001,F3,1,10\r\n' + pf + '-0002,F3,2,10\r\n' + pf + '-0003,F3,3,10\r\n'; downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv'); toast('빈 양식 CSV 내려받음'); };
       if ($('wPick')) $('wPick').onclick = function () { $('wFile').click(); };
+      if ($('wShot')) $('wShot').onclick = function () { $('wCam').click(); };
+      if ($('wCam')) $('wCam').onchange = function () {
+        var f = this.files && this.files[0]; this.value = '';
+        readLabelFile(f, function (rows, note) { w.rows = rows; w.fileName = f.name; w.fromOCR = (note === 'ocr'); renderNew(); });
+      };
       if ($('wFile')) $('wFile').onchange = function () {
-        var f = this.files && this.files[0]; if (!f) return; var nm = f.name.toLowerCase();
-        function finish(rows) { if (!rows || !rows.length) { toast('라벨을 인식하지 못했습니다'); return; } w.rows = rows; w.fileName = f.name; renderNew(); }
-        if (/\.(xlsx|xls)$/.test(nm)) { ensureXLSX(function (ok) { if (!ok) { toast('엑셀 파서를 불러오지 못했습니다'); return; } var rd = new FileReader(); rd.onload = function () { finish(parseXlsx(rd.result)); }; rd.onerror = function () { toast('파일을 읽지 못했습니다'); }; rd.readAsArrayBuffer(f); }); }
-        else { var rd = new FileReader(); rd.onload = function () { finish(parseLabels(rd.result)); }; rd.onerror = function () { toast('파일을 읽지 못했습니다'); }; rd.readAsText(f, 'utf-8'); }
+        var f = this.files && this.files[0]; this.value = '';
+        readLabelFile(f, function (rows, note) { w.rows = rows; w.fileName = f.name; w.fromOCR = (note === 'ocr'); renderNew(); });
       };
     } else {
-      document.querySelectorAll('.wtoggle').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (w.traitOff[i]) delete w.traitOff[i]; else w.traitOff[i] = 1; renderNew(); }; });
+      document.querySelectorAll('.wtoggle').forEach(function (b) { b.onclick = function () { var bd = $('wBody'); S._wizScroll = bd ? bd.scrollTop : 0; var i = +b.getAttribute('data-i'); if (w.traitOff[i]) delete w.traitOff[i]; else w.traitOff[i] = 1; renderNew(); }; });
     }
   }
   function createProject() {
@@ -623,10 +687,10 @@
       '</div>' +
       // line nav
       '<div style="padding:10px 14px 18px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
-        '<div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--text-muted);margin-bottom:8px">' + ico('chevron-left', 'var(--text-muted)', 15) + ' 좌우로 밀어 개체 이동 · <span id="cNum">개체</span> ' + ico('chevron-right', 'var(--text-muted)', 15) + '</div>' +
+        '<div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--text-muted);margin-bottom:8px">' + ico('chevron-left', 'var(--text-muted)', 15) + ' 좌우: 개체 · 상하: 라벨번호 · <span id="cNum">개체</span> ' + ico('chevron-right', 'var(--text-muted)', 15) + '</div>' +
         '<div style="display:flex;gap:10px">' +
-          '<button class="btn" id="cPrev" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">' + ico('chevron-left', 'var(--text-primary)', 16) + ' 이전 계통</button>' +
-          '<button class="btn" id="cNext" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">다음 계통 ' + ico('chevron-right', 'var(--text-primary)', 16) + '</button>' +
+          '<button class="btn" id="cPrev" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">' + ico('chevron-left', 'var(--text-primary)', 16) + ' 이전 라벨번호</button>' +
+          '<button class="btn" id="cNext" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">다음 라벨번호 ' + ico('chevron-right', 'var(--text-primary)', 16) + '</button>' +
         '</div>' +
       '</div>';
     renderCard(); renderDate(); renderPills(); renderInput(); renderHist(); renderMap();
@@ -640,10 +704,10 @@
     $('qVoice').onclick = function () { S.voice = { transcript: '', parsed: [], listening: false }; go('voice'); };
     updatePhotoBadge();
     if (!S.showMap) $('cMapWrap').classList.add('hidden');
-    // swipe (touch + mouse) — 좌우로 밀어 개체 이동
-    attachSwipe($('cInput'), moveIndiv);
-    attachSwipe($('cCard'), moveIndiv);
-    attachSwipe($('cHist'), moveIndiv);
+    // swipe — 좌우: 개체 이동 · 상하: 라벨번호(계통) 이동
+    attachSwipe($('cInput'), moveIndiv, moveLine);
+    attachSwipe($('cCard'), moveIndiv, moveLine);
+    attachSwipe($('cHist'), moveIndiv, moveLine);
   }
   function refreshCollect() {
     if (S.view !== 'collect' || S.traitEdit) return;
@@ -655,16 +719,33 @@
     if (nv === S.indiv) return; S.indiv = nv;
     (window.requestAnimationFrame || function (f) { setTimeout(f, 16); })(function () { refreshCollect(); });
   }
-  function attachSwipe(el, cb) {
+  function attachSwipe(el, cb, cbV) {
     if (!el) return;
-    el.style.touchAction = 'pan-y';
-    var x0 = null, y0 = null, t0 = 0, sw = false;
+    el.style.touchAction = cbV ? 'none' : 'pan-y';
+    var x0 = null, y0 = null, t0 = 0, sw = false, dir = null;
     function trig(dx) { haptic(15); cb(dx < 0 ? 1 : -1); }
-    el.addEventListener('touchstart', function (e) { var t = e.touches && e.touches[0]; if (!t) return; x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); sw = false; }, { passive: true });
-    el.addEventListener('touchmove', function (e) { if (x0 == null) return; var t = e.touches && e.touches[0]; if (!t) return; var dx = t.clientX - x0, dy = t.clientY - y0; if (!sw && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) sw = true; if (sw) e.preventDefault(); }, { passive: false });
-    el.addEventListener('touchend', function (e) { if (x0 == null) return; var t = e.changedTouches && e.changedTouches[0]; var dx = t ? t.clientX - x0 : 0, dy = t ? t.clientY - y0 : 0, dt = Date.now() - t0; x0 = null; if (sw && dt < 800 && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.preventDefault(); trig(dx); } sw = false; }, { passive: false });
+    el.addEventListener('touchstart', function (e) { var t = e.touches && e.touches[0]; if (!t) return; x0 = t.clientX; y0 = t.clientY; t0 = Date.now(); sw = false; dir = null; }, { passive: true });
+    el.addEventListener('touchmove', function (e) { if (x0 == null) return; var t = e.touches && e.touches[0]; if (!t) return; var dx = t.clientX - x0, dy = t.clientY - y0;
+      if (!dir && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) dir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      if (dir === 'h') { sw = true; e.preventDefault(); }
+      else if (dir === 'v' && cbV) { sw = true; e.preventDefault(); }
+    }, { passive: false });
+    el.addEventListener('touchend', function (e) { if (x0 == null) return; var t = e.changedTouches && e.changedTouches[0]; var dx = t ? t.clientX - x0 : 0, dy = t ? t.clientY - y0 : 0, dt = Date.now() - t0; x0 = null;
+      if (sw && dt < 800) {
+        if (dir === 'h' && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.preventDefault(); trig(dx); }
+        else if (dir === 'v' && cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { e.preventDefault(); haptic(15); cbV(dy < 0 ? -1 : 1); }
+      }
+      sw = false; dir = null; }, { passive: false });
     el.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') return; x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); });
-    el.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') return; if (x0 == null) return; var dx = e.clientX - x0, dy = e.clientY - y0, dt = Date.now() - t0; x0 = null; if (dt < 800 && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) trig(dx); });
+    el.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') return; if (x0 == null) return; var dx = e.clientX - x0, dy = e.clientY - y0, dt = Date.now() - t0; x0 = null; if (dt >= 800) return;
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) trig(dx);
+      else if (cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { haptic(15); cbV(dy < 0 ? -1 : 1); }
+    });
+  }
+  function moveLine(d) {
+    var g = curGen(), nv = Math.max(0, Math.min(g.lines.length - 1, S.lineIdx + d));
+    if (nv === S.lineIdx) return;
+    S.lineIdx = nv; S.indiv = 1; renderCollect();
   }
 
   function renderCard() {
@@ -706,12 +787,31 @@
       html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', '#3B6D11', 11) : '') + '</button>';
     });
     html += '<button class="btn" id="cNewDate" style="padding:5px 10px;font-size:12px;border-radius:16px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 13) + ' 새 조사</button></div>' +
-      '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 날짜를 수정할 수 있어요 · 시계열 형질(' + ico('clock', '#3B6D11', 10) + ')만 조사일마다 저장</div>';
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 수정·삭제할 수 있어요 · 시계열 형질(' + ico('clock', '#3B6D11', 10) + ')만 조사일마다 저장</div>';
     bar.innerHTML = html;
-    bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { editDate(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
+    bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
     $('cNewDate').onclick = function () { var d = prompt('새 조사일 (예: ' + todayStr() + ')', todayStr()); if (d == null) return; d = d.trim(); if (!d) return; if (g.surveyDates.indexOf(d) < 0) { g.surveyDates.push(d); kvSet('gens', S.gens); } S.date = d; loadValsThen(renderCollect); toast(d + ' 조사 시작'); };
   }
   function loadValsThen(cb) { loadVals().then(cb); }
+  function dateMenu(d) {
+    var g = curGen();
+    if (g.surveyDates.length <= 1) { editDate(d); return; }
+    if (confirm('"' + d + '" 조사일\n\n[확인] 날짜 수정   [취소] 삭제 여부 묻기')) { editDate(d); return; }
+    if (confirm('"' + d + '" 조사일을 삭제할까요?\n이 날짜에 입력한 시계열 값도 함께 삭제됩니다.')) deleteSurveyDate(d);
+  }
+  function deleteSurveyDate(d) {
+    var g = curGen(), idx = g.surveyDates.indexOf(d); if (idx < 0) return;
+    if (g.surveyDates.length <= 1) { toast('조사일은 최소 1개 필요합니다'); return; }
+    g.surveyDates.splice(idx, 1);
+    if (S.date === d) S.date = g.surveyDates[g.surveyDates.length - 1];
+    obsAll().then(function (all) {
+      return new Promise(function (res) {
+        var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
+        all.forEach(function (r) { if (r.genId === g.id && r.date === d) st.delete(r.k); });
+        tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
+      });
+    }).then(function () { return kvSet('gens', S.gens); }).then(function () { return loadVals(); }).then(function () { updatePending(); renderCollect(); toast('조사일 삭제됨 · ' + d); });
+  }
   function editDate(d) { var nv = prompt('조사일 수정 (예: ' + d + ')', d); if (nv == null) return; nv = nv.trim(); if (!nv || nv === d) return; renameSurveyDate(d, nv); }
   function renameSurveyDate(oldD, newD) {
     var g = curGen(), idx = g.surveyDates.indexOf(oldD); if (idx < 0) return;
@@ -1041,6 +1141,200 @@
     for (var r = start; r < rows.length; r++) { var row = rows[r]; var label = String(row[li] == null ? '' : row[li]).trim(); if (!label) continue; var rec = { label: label }; if (ri >= 0 && row[ri] != null && String(row[ri]).trim() !== '') rec.rep = parseInt(row[ri]) || null; if (ii >= 0 && row[ii] != null && String(row[ii]).trim() !== '') rec.indiv = parseInt(row[ii]) || null; if (gi >= 0 && row[gi] != null && String(row[gi]).trim() !== '') rec.gen = String(row[gi]).trim(); out.push(rec); }
     return out;
   }
+  function looksBinary(txt) {
+    var s = String(txt || '').slice(0, 4000), bad = 0;
+    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); if (c === 0 || c === 0xFFFD || c < 9 || (c > 13 && c < 32)) bad++; }
+    return s.length > 0 && bad / s.length > 0.02;
+  }
+  function sanitizeRows(rows) {
+    return (rows || []).filter(function (r) {
+      var lb = String(r.label == null ? '' : r.label).trim();
+      if (!lb || lb.length > 40) return false;
+      if (/[\uFFFD\u0000-\u0008\u000E-\u001F]/.test(lb)) return false;
+      return /[0-9A-Za-z가-힣]/.test(lb);
+    });
+  }
+  // 라벨 목록 파일 읽기 — 엑셀·CSV / 사진(OCR) / PDF 지원
+  function readLabelFile(f, onOk) {
+    if (!f) return;
+    var nm = (f.name || '').toLowerCase();
+    var isSheet = /\.(xlsx|xls)$/.test(nm), isText = /\.(csv|tsv|txt)$/.test(nm);
+    var isImg = /\.(jpg|jpeg|png|gif|heic|heif|webp|bmp)$/.test(nm) || /^image\//.test(f.type || '');
+    var isPdf = /\.pdf$/.test(nm) || (f.type || '') === 'application/pdf';
+    if (!isSheet && !isText && !isImg && !isPdf) { toast('지원하지 않는 형식입니다 · 엑셀·CSV·사진·PDF를 선택하세요'); return; }
+    function done(rows, note) {
+      rows = sanitizeRows(rows);
+      if (!rows.length) { toast('라벨을 인식하지 못했습니다 · 표가 선명하게 보이도록 다시 찍어보세요'); return; }
+      onOk(rows, note);
+    }
+    if (isSheet) {
+      ensureXLSX(function (ok) {
+        if (!ok) { toast('엑셀 파서를 불러오지 못했습니다 · 온라인에서 한 번 실행해 주세요'); return; }
+        var rd = new FileReader();
+        rd.onload = function () { try { done(parseXlsx(rd.result)); } catch (e) { toast('엑셀을 읽지 못했습니다'); } };
+        rd.onerror = function () { toast('파일을 읽지 못했습니다'); };
+        rd.readAsArrayBuffer(f);
+      });
+      return;
+    }
+    if (isText) {
+      var rd = new FileReader();
+      rd.onload = function () {
+        var txt = rd.result;
+        if (looksBinary(txt)) { toast('텍스트 파일이 아닙니다 · 엑셀(.xlsx)이나 CSV를 선택하세요'); return; }
+        done(parseLabels(txt));
+      };
+      rd.onerror = function () { toast('파일을 읽지 못했습니다'); };
+      rd.readAsText(f, 'utf-8');
+      return;
+    }
+    if (isImg) {
+      toast('사진에서 표 인식 중… 잠시만요');
+      runOCRBlock(f, function (m) { if (m && m.status === 'recognizing text') toast('인식 중 ' + Math.round((m.progress || 0) * 100) + '%'); })
+        .then(function (r) { var rows = parseByHeader(r.lines) || parseTextTable(r.text); done(rows, 'ocr'); })
+        .catch(function () { toast('인식 엔진을 불러오지 못했습니다 · 온라인에서 한 번 실행해 주세요'); });
+      return;
+    }
+    // PDF: use embedded text when available, otherwise rasterize pages and OCR
+    toast('PDF 읽는 중…');
+    ensurePDFJS().then(function (ok) {
+      if (!ok) { toast('PDF 모듈을 불러오지 못했습니다 · 온라인에서 한 번 실행해 주세요'); return; }
+      var rd = new FileReader();
+      rd.onerror = function () { toast('파일을 읽지 못했습니다'); };
+      rd.onload = function () {
+        window.pdfjsLib.getDocument({ data: new Uint8Array(rd.result) }).promise.then(function (doc) {
+          var maxPages = Math.min(doc.numPages, 5), texts = [], seq = Promise.resolve();
+          for (var p = 1; p <= maxPages; p++) {
+            (function (pn) { seq = seq.then(function () { return doc.getPage(pn).then(function (pg) { return pg.getTextContent().then(function (tc) { var last = null, line = []; var lines = []; tc.items.forEach(function (it) { var y = Math.round(it.transform[5]); if (last !== null && Math.abs(y - last) > 3) { lines.push(line.join(' ')); line = []; } line.push(it.str); last = y; }); if (line.length) lines.push(line.join(' ')); texts.push(lines.join('\n')); }); }); }); })(p);
+          }
+          seq.then(function () {
+            var joined = texts.join('\n');
+            var rows = sanitizeRows(parseTextTable(joined));
+            if (rows.length) { done(rows, 'pdf-text'); return; }
+            // scanned PDF → render first pages to canvas, then OCR
+            toast('스캔 PDF · 표 인식 중…');
+            var ocrSeq = Promise.resolve(), accLines = [], accText = [];
+            for (var q = 1; q <= Math.min(doc.numPages, 3); q++) {
+              (function (pn) {
+                ocrSeq = ocrSeq.then(function () {
+                  return doc.getPage(pn).then(function (pg) {
+                    var vp = pg.getViewport({ scale: 2 });
+                    var cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+                    return pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise.then(function () {
+                      return runOCRBlock(cv.toDataURL('image/jpeg', 0.9)).then(function (r) { accLines = accLines.concat(r.lines || []); accText.push(r.text || ''); });
+                    });
+                  });
+                });
+              })(q);
+            }
+            ocrSeq.then(function () { done(parseByHeader(accLines) || parseTextTable(accText.join('\n')), 'ocr'); })
+              .catch(function () { toast('PDF에서 표를 인식하지 못했습니다'); });
+          });
+        }).catch(function () { toast('PDF를 열지 못했습니다'); });
+      };
+      rd.readAsArrayBuffer(f);
+    });
+  }
+  function ensurePDFJS() {
+    return new Promise(function (res) {
+      if (window.pdfjsLib) { res(true); return; }
+      if (window.__pdfCbs) { window.__pdfCbs.push(res); return; }
+      window.__pdfCbs = [res];
+      var s = document.createElement('script'); s.src = './pdf/pdf.min.js';
+      s.onload = function () { var ok = !!window.pdfjsLib; if (ok) { try { window.pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf/pdf.worker.min.js'; } catch (e) {} } window.__pdfCbs.forEach(function (f) { f(ok); }); window.__pdfCbs = null; };
+      s.onerror = function () { window.__pdfCbs.forEach(function (f) { f(false); }); window.__pdfCbs = null; };
+      document.head.appendChild(s);
+    });
+  }
+  // OCR a full text block, returning both text and word boxes (for header/column mapping)
+  function runOCRBlock(src, onp) {
+    return ensureTesseract().then(function (ok) {
+      if (!ok) throw new Error('no-engine');
+      return window.Tesseract.createWorker('kor+eng', 1, { workerPath: './ocr/worker.min.js', corePath: './ocr/tesseract-core-lstm.wasm.js', langPath: './ocr/', logger: onp });
+    }).then(function (worker) {
+      return worker.setParameters({ tessedit_pageseg_mode: '6' })
+        .then(function () { return worker.recognize(src, {}, { blocks: true, text: true }); })
+        .then(function (r) { return worker.terminate().then(function () { return { text: (r.data && r.data.text) || '', lines: ocrLines(r.data) }; }); });
+    });
+  }
+  function ocrLines(data) {
+    var out = [];
+    try {
+      (data.blocks || []).forEach(function (b) {
+        (b.paragraphs || []).forEach(function (p) {
+          (p.lines || []).forEach(function (ln) {
+            var words = (ln.words || []).map(function (wd) { return { text: String(wd.text || '').trim(), x0: wd.bbox ? wd.bbox.x0 : 0, x1: wd.bbox ? wd.bbox.x1 : 0 }; }).filter(function (wd) { return wd.text; });
+            if (words.length) out.push(words);
+          });
+        });
+      });
+    } catch (e) {}
+    return out;
+  }
+  // Header keyword sets (Korean + English)
+  var HDR = {
+    label: /라벨|라밸|번호|계통|조합|label|line|code|no\.?$/i,
+    gen: /세대|세[대다]|gen|generation/i,
+    rep: /반복|블[록럭]|rep|block/i,
+    indiv: /개체|주수|포기|plant|indiv/i
+  };
+  function headerCols(lines) {
+    for (var i = 0; i < Math.min(lines.length, 6); i++) {
+      var ws = lines[i], cols = {}, hits = 0;
+      ws.forEach(function (wd) {
+        var t = wd.text.replace(/[^0-9A-Za-z가-힣.]/g, '');
+        if (!t) return;
+        ['label', 'gen', 'rep', 'indiv'].forEach(function (k) {
+          if (cols[k] == null && HDR[k].test(t)) { cols[k] = (wd.x0 + wd.x1) / 2; hits++; }
+        });
+      });
+      // need at least the label column plus one more to trust the header
+      if (cols.label != null && hits >= 2) return { row: i, cols: cols };
+    }
+    return null;
+  }
+  function parseByHeader(lines) {
+    var h = headerCols(lines); if (!h) return null;
+    var keys = Object.keys(h.cols), out = [];
+    for (var i = h.row + 1; i < lines.length; i++) {
+      var rec = {}, ws = lines[i];
+      ws.forEach(function (wd) {
+        var cx = (wd.x0 + wd.x1) / 2, best = null, bd = 1e9;
+        keys.forEach(function (k) { var d = Math.abs(cx - h.cols[k]); if (d < bd) { bd = d; best = k; } });
+        if (!best) return;
+        var t = wd.text.trim();
+        if (best === 'label') rec.label = (rec.label ? rec.label + t : t);
+        else if (best === 'gen') rec.gen = t.toUpperCase();
+        else { var n = parseInt(t.replace(/[^0-9]/g, ''), 10); if (!isNaN(n)) rec[best] = n; }
+      });
+      if (rec.label && /\d/.test(rec.label)) out.push(rec);
+    }
+    return out.length ? out : null;
+  }
+  // Parse OCR'd / PDF text lines into label rows (fallback when no header found).
+  function parseTextTable(text) {
+    var out = [];
+    String(text || '').split(/\r?\n/).forEach(function (raw) {
+      var line = raw.replace(/[|/\\]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!line) return;
+      var toks = line.split(' ');
+      // label = first token containing a digit and at least 3 chars (e.g. 26-0001, CU24-001)
+      var li = -1;
+      for (var i = 0; i < toks.length; i++) { var t = toks[i]; if (/\d/.test(t) && /^[0-9A-Za-z가-힣\-\.]{3,40}$/.test(t) && !/^\d{1,2}$/.test(t)) { li = i; break; } }
+      if (li < 0) return;
+      var rec = { label: toks[li].replace(/[.,]+$/, '') };
+      var rest = toks.slice(li + 1);
+      rest.forEach(function (t) {
+        if (rec.gen == null && /^[FfBbSs]\d{1,2}$/.test(t)) { rec.gen = t.toUpperCase(); return; }
+        var n = parseInt(t, 10);
+        if (!isNaN(n) && String(n) === t.replace(/^0+(?=\d)/, '')) {
+          if (rec.rep == null) rec.rep = n; else if (rec.indiv == null) rec.indiv = n;
+        }
+      });
+      out.push(rec);
+    });
+    return out;
+  }
   function parseLabels(text) {
     text = String(text).replace(/^\uFEFF/, '');
     var lines = text.split(/\r?\n/).filter(function (l) { return l.trim() !== ''; });
@@ -1060,18 +1354,22 @@
     s.onerror = function () { window.__xlsxCbs.forEach(function (f) { f(false); }); window.__xlsxCbs = null; };
     document.head.appendChild(s);
   }
+  function bulkPrefix(g) { var p = String((g && g.prefix) || ''); return /^\d{2}$/.test(p) ? p : yy(); }
   function bulkTemplate() {
-    var g = S.gens[S.bulkIdx] || S.gens[0]; var pf = (g && g.prefix) || 'CU';
-    var csv = '라벨번호,반복,개체수\r\n' + pf + '-001,1,10\r\n' + pf + '-002,1,10\r\n' + pf + '-003,2,10\r\n';
-    var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }); var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'label_template.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1500); toast('빈 양식 CSV 내려받음');
+    var g = S.gens[S.bulkIdx] || S.gens[0];
+    var pf = (g && /^\d{2}$/.test(String(g.prefix || '')) ? g.prefix : yy());
+    var gl = (g && g.label) || 'F3';
+    var csv = '라벨번호,세대,반복,개체수\r\n' + pf + '-0001,' + gl + ',1,10\r\n' + pf + '-0002,' + gl + ',2,10\r\n' + pf + '-0003,' + gl + ',3,10\r\n';
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv');
+    toast('빈 양식 CSV 내려받음');
   }
   function applyBulk() {
     var g = S.gens[S.bulkIdx], rows = S.bulkRows || []; if (!g || !rows.length) return;
     var base = Date.now();
     rows.forEach(function (rec, i) {
       var l = g.lines[i];
-      if (l) { l.label = rec.label; if (rec.rep) { l.rep = rec.rep; l.block = 'B-' + rec.rep; } if (rec.indiv) l.indivTotal = rec.indiv; }
-      else { var rep = rec.rep || ((i % 3) + 1); g.lines.push({ id: 'L' + base + '_' + i, label: rec.label, rep: rep, block: 'B-' + rep, zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: rec.indiv || (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); }
+      if (l) { l.label = rec.label; if (rec.rep) { l.rep = rec.rep; l.block = 'B-' + rec.rep; } if (rec.indiv) l.indivTotal = rec.indiv; if (rec.gen) l.gen = rec.gen; }
+      else { var rep = rec.rep || ((i % 3) + 1); g.lines.push({ id: 'L' + base + '_' + i, label: rec.label, gen: rec.gen || undefined, rep: rep, block: 'B-' + rep, zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: rec.indiv || (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); }
     });
     kvSet('gens', S.gens).then(function () { toast(rows.length + '개 라벨 등록됨'); S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; S.editIdx = S.bulkIdx; go('genedit'); });
   }
@@ -1081,29 +1379,29 @@
     var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="bBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">라벨 일괄등록</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · 계통 ' + g.lines.length + '</div></div></div>';
     if (S.bulkStage === 'parsed' && S.bulkRows) {
       var rows = S.bulkRows, prev = rows.slice(0, 20);
-      var table = '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:7px 9px">#</th><th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 9px">반복</th><th style="text-align:center;padding:7px 9px">개체수</th></tr></thead><tbody>' +
-        prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:6px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:6px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:6px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      var table = '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:7px 9px">#</th><th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 9px">세대</th><th style="text-align:center;padding:7px 9px">반복</th><th style="text-align:center;padding:7px 9px">개체수</th></tr></thead><tbody>' +
+        prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:6px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:6px 9px;text-align:center">' + esc(r.gen || g.label) + '</td><td style="padding:6px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:6px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>';
       v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">' + esc(S.bulkFileName) + ' · <b style="color:var(--text-primary)">' + rows.length + '개</b> 라벨 인식' + (rows.length > 20 ? ' (앞 20개 미리보기)' : '') + '</div>' + table +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">순서대로 기존 계통에 라벨이 채워지고, 초과분은 계통으로 추가됩니다. 반복·개체수가 있으면 함께 반영됩니다. 기존 수집값은 유지됩니다.</div></div>' +
         '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><div style="display:flex;gap:10px"><button class="btn" id="bReset" style="flex:0 0 100px;height:48px;font-size:14px">다시 선택</button><button class="btn primary" id="bApply" style="flex:1;height:48px;font-size:15px">' + esc(g.label) + ' 세대에 ' + rows.length + '개 등록</button></div></div>';
       $('bReset').onclick = function () { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); };
       $('bApply').onclick = applyBulk;
     } else {
-      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 .xlsx · CSV)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고, 반복·개체수는 선택입니다.</div>' +
-        '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,반복,개체수\n' + esc(g.prefix || 'CU') + '-001,1,10\n' + esc(g.prefix || 'CU') + '-002,1,10</div></div>' +
+      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
+        '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,세대,반복,개체수\n' + esc(bulkPrefix(g)) + '-0001,' + esc(g.label) + ',1,10\n' + esc(bulkPrefix(g)) + '-0002,' + esc(g.label) + ',2,10</div></div>' +
         '<button class="btn" id="bTpl" style="width:100%;height:46px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
-        '<button class="btn primary" id="bPick" style="width:100%;height:52px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 엑셀·CSV 파일 선택</button>' +
-        '<input type="file" id="bFile" accept=".xlsx,.xls,.csv,.tsv,.txt" style="display:none">' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">엑셀(.xlsx) 파일을 그대로 선택하면 됩니다. 첫 시트의 라벨번호 열을 읽습니다. CSV·TSV도 지원합니다.</div></div>';
+        '<button class="btn primary" id="bPick" style="width:100%;height:52px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
+        '<button class="btn" id="bShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +
+        '<input type="file" id="bCam" accept="image/*" capture="environment" style="display:none">' +
+        '<input type="file" id="bFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" style="display:none">' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">엑셀·CSV가 가장 정확합니다. 종이 표를 촬영하거나 PDF를 넣으면 <b>한글 머리글</b>을 읽어 열을 맞춰 채웁니다(인쇄된 표 기준). 인식 결과는 미리보기에서 확인하세요.</div></div>';
       $('bTpl').onclick = bulkTemplate;
       $('bPick').onclick = function () { $('bFile').click(); };
+      if ($('bShot')) $('bShot').onclick = function () { $('bCam').click(); };
+      if ($('bCam')) $('bCam').onchange = function () { var f = this.files && this.files[0]; this.value = ''; readLabelFile(f, function (rows, note) { S.bulkRows = rows; S.bulkFileName = f.name; S.bulkFromOCR = (note === 'ocr'); S.bulkStage = 'parsed'; renderBulk(); }); };
       $('bFile').onchange = function () {
-        var f = this.files && this.files[0]; if (!f) return; var name = f.name.toLowerCase();
-        function finish(rows) { if (!rows || !rows.length) { toast('라벨을 인식하지 못했습니다'); return; } S.bulkRows = rows; S.bulkFileName = f.name; S.bulkStage = 'parsed'; renderBulk(); }
-        function fail() { toast('파일을 읽지 못했습니다'); }
-        if (/\.(xlsx|xls)$/.test(name)) {
-          ensureXLSX(function (ok) { if (!ok) { toast('엑셀 파서를 불러오지 못했습니다. 온라인에서 한 번 실행한 뒤 다시 시도하세요.'); return; } var rd = new FileReader(); rd.onload = function () { finish(parseXlsx(rd.result)); }; rd.onerror = fail; rd.readAsArrayBuffer(f); });
-        } else { var rd = new FileReader(); rd.onload = function () { finish(parseLabels(rd.result)); }; rd.onerror = fail; rd.readAsText(f, 'utf-8'); }
+        var f = this.files && this.files[0]; this.value = '';
+        readLabelFile(f, function (rows, note) { S.bulkRows = rows; S.bulkFileName = f.name; S.bulkFromOCR = (note === 'ocr'); S.bulkStage = 'parsed'; renderBulk(); });
       };
     }
     $('bBack').onclick = function () { if (S.bulkStage === 'parsed') { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); } else { S.editIdx = S.bulkIdx; go('genedit'); } };
@@ -1356,7 +1654,7 @@
     v.innerHTML =
       '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
       '<div style="padding:16px 16px">' +
-        '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 내보냅니다.<br>열: 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>개체선발</b> · <b>계통선발</b></div>' +
+        '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 내보냅니다.<br>열: No. · 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>단위</b> · <b>개체 선발</b> · <b>조합, 계통 선발</b><br>파일명: 과제명_처음라벨-마지막라벨_일자.csv</div>' +
         '<button class="btn primary" id="eCsv" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px">' + ico('file-export', '#fff', 20) + ' CSV 내보내기 (다운로드)</button>' +
         '<button class="btn" id="ePhotos" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('download', 'var(--text-primary)', 20) + ' 사진 다운로드 (jpg 개별저장)</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +

@@ -46,7 +46,7 @@ self.addEventListener('fetch', (e) => {
   // cross-origin: leave to browser
   if (url.origin !== self.location.origin) return;
   // big lazy assets + static icons: cache-first (download once, then offline)
-  if (url.pathname.indexOf('/ocr/') !== -1 || url.pathname.endsWith('xlsx.min.js') || url.pathname.indexOf('/icons/') !== -1) {
+  if (url.pathname.indexOf('/ocr/') !== -1 || url.pathname.indexOf('/pdf/') !== -1 || url.pathname.endsWith('xlsx.min.js') || url.pathname.indexOf('/icons/') !== -1) {
     e.respondWith(cacheFirst(req));
     return;
   }
