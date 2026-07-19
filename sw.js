@@ -3,6 +3,7 @@ const CACHE = 'cropmemo-v3';
 const SHELL = [
   './', './index.html', './app.js', './icons.js', './styles.css',
   './manifest.webmanifest',
+  './CropMemoPro_GAS_Code.gs',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
 ];
 

@@ -22,6 +22,7 @@
   function kvGet(k) { return new Promise(function (res) { var r = os('kv', 'readonly').get(k); r.onsuccess = function () { res(r.result); }; r.onerror = function () { res(undefined); }; }); }
   function kvSet(k, v) { return new Promise(function (res) { var r = os('kv', 'readwrite').put(v, k); r.onsuccess = function () { res(true); }; r.onerror = function () { res(false); }; }); }
   function obsPut(rec) { return new Promise(function (res) { var r = os('obs', 'readwrite').put(rec); r.onsuccess = function () { res(true); }; r.onerror = function () { res(false); }; }); }
+  function recSeries(r) { return (r && r.ser != null) ? !!r.ser : (String(r && r.k || '').indexOf('@') > -1); }
   function obsAll() { return new Promise(function (res) { var out = [], r = os('obs', 'readonly').openCursor(); r.onsuccess = function (e) { var c = e.target.result; if (c) { out.push(c.value); c.continue(); } else res(out); }; r.onerror = function () { res(out); }; }); }
   function photoPut(rec) { return new Promise(function (res) { var r = os('photos', 'readwrite').put(rec); r.onsuccess = function () { res(true); }; r.onerror = function () { res(false); }; }); }
   function photoGet(id) { return new Promise(function (res) { var r = os('photos', 'readonly').get(id); r.onsuccess = function () { res(r.result); }; r.onerror = function () { res(null); }; }); }
@@ -143,7 +144,7 @@
       var n = String(i + 1).padStart(3, '0');
       lines.push({ id: 'L' + n, label: 'CU24-' + n, rep: (i % 3) + 1, block: 'B-' + ((i % 3) + 1), zone: 'A동', row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: 10, selected: false });
     }
-    return [{ id: 'G1', projName: '오이 내병성 육종', crop: '오이', color: '#4E9A51', label: 'F3', prefix: 'CU', surveyDates: ['6/20', todayStr()], traits: traits, lines: lines }];
+    return [{ id: 'G1', projId: 'P_demo', projName: '오이 내병성 육종', crop: '오이', color: '#4E9A51', label: 'F3', prefix: 'CU', surveyDates: ['6/20', todayStr()], traits: traits, lines: lines }];
   }
 
   // ---------- state ----------
@@ -152,6 +153,25 @@
             lastSync: null, pending: 0, syncing: false, view: 'home', showMap: false, traitEdit: false, editIdx: 0, anTrait: null, bulkIdx: 0, bulkStage: 'idle', bulkRows: null, bulkFileName: '', ocr: null, photos: [], photoSel: {}, drawId: null, voice: null, write: null, traitEditFrom: null };
 
   function curGen() { return S.gens[S.genIdx]; }
+  // ----- 과제(프로젝트) 그룹: 한 과제 안에 여러 세대 -----
+  function projKeyOf(g) { return g && (g.projId || ('P_' + g.projName)); }
+  function projects() {
+    var map = {}, order = [];
+    S.gens.forEach(function (g, i) {
+      var k = projKeyOf(g);
+      if (!map[k]) { map[k] = { id: k, name: g.projName, crop: g.crop, color: g.color, items: [] }; order.push(k); }
+      map[k].items.push({ g: g, idx: i });
+    });
+    return order.map(function (k) {
+      var p = map[k];
+      p.items.sort(function (a, b) { var ia = GEN_ORDER.indexOf(a.g.label), ib = GEN_ORDER.indexOf(b.g.label); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+      p.lines = p.items.reduce(function (n, it) { return n + it.g.lines.length; }, 0);
+      return p;
+    });
+  }
+  function projectOf(key) { var all = projects(); for (var i = 0; i < all.length; i++) if (all[i].id === key) return all[i]; return null; }
+  function curProjKey() { return projKeyOf(curGen()); }
+  function genRole(label) { return label === 'F1' ? '조합' : '계통'; }
   function curLine() { return curGen().lines[S.lineIdx]; }
   function traitById(id) { var ts = curGen().traits; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   function total() { return curLine().indivTotal; }
@@ -163,7 +183,7 @@
     var g = curGen(), l = curLine(), t = traitById(tid);
     var k = valKey(l.id, S.indiv, tid);
     S.vals[k] = value;
-    var rec = { k: k, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: tid, date: (t && t.series ? S.date : null), value: value, updatedAt: Date.now(), dirty: 1 };
+    var rec = { k: k, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: tid, date: S.date, ser: !!(t && t.series), value: value, updatedAt: Date.now(), dirty: 1 };
     await obsPut(rec);
     S.lastSaved = Date.now();
     updatePending();
@@ -207,6 +227,7 @@
   }
   async function trySync(silent) {
     var url = S.settings.syncUrl;
+    if (S.settings.syncOn === false) { if (!silent) toast('동기화가 꺼져 있습니다 · 홈에서 켜주세요'); return; }
     if (!url) { if (!silent) toast('설정에서 동기화 URL을 입력하세요'); return; }
     if (!navigator.onLine) { if (!silent) toast('오프라인 상태입니다'); return; }
     var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
@@ -215,7 +236,7 @@
       batch.push({ table: 'line', key: g.id + '|' + l.id, data: { projId: g.id, genId: g.id, label: l.label, zone: l.zone, row: l.row, col: l.col, rep: l.rep, block: l.block, indivTotal: l.indivTotal, selected: !!l.selected }, updatedAt: Date.now() });
     });
     dirty.forEach(function (r) {
-      batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
+      batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (recSeries(r) && r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
     });
     S.syncing = true; renderCurrent();
     try {
@@ -316,7 +337,7 @@
     { name: '무', color: '#7BA0C4', prefix: 'RD' }, { name: '배추', color: '#7FB069', prefix: 'CB' },
     { name: '수박', color: '#2E7D5B', prefix: 'WM' }, { name: '오이', color: '#4E9A51', prefix: 'CU' }
   ];
-  var GEN_ORDER = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6'];
+  var GEN_ORDER = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9'];
   var TRAITSETS = {
     '토마토': [{ name: '과장', type: 'numeric', unit: 'mm' }, { name: '과중', type: 'numeric', unit: 'g' }, { name: '당도', type: 'numeric', unit: 'Bx' }, { name: '병징', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '발병면적률', type: 'ratio', unit: '%' }, { name: 'TSWV 저항성', type: 'rating', scale: ['R', 'IR', 'S'] }, { name: '착과수', type: 'counter' }, { name: '과형', type: 'categorical', options: ['원형', '편원형', '장형'] }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }],
     '고추': [{ name: '과장', type: 'numeric', unit: 'mm' }, { name: '과폭', type: 'numeric', unit: 'mm' }, { name: '과중', type: 'numeric', unit: 'g' }, { name: '신미', type: 'categorical', options: ['약', '중', '강'] }, { name: '역병 저항성', type: 'rating', scale: ['R', 'IR', 'S'] }, { name: '탄저병', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '착과수', type: 'counter' }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }],
@@ -499,7 +520,7 @@
         for (var i = 0; i < w.lines; i++) { var n = String(i + 1).padStart(4, '0'); lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: w.prefix + '-' + n, rep: w.rcbd ? ((i % w.reps) + 1) : 1, block: w.rcbd ? ('B-' + ((i % w.reps) + 1)) : '', zone: w.zone, row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: w.indiv, selected: false }); }
       }
       if (!lines.length) return;
-      newGens.push({ id: 'G' + base + '_' + gi, projName: w.name, crop: w.crop, color: (meta && meta.color) || '#639922', label: gl, prefix: w.prefix, surveyDates: [todayStr()], traits: traits, lines: lines });
+      newGens.push({ id: 'G' + base + '_' + gi, projId: 'P' + base, projName: w.name, crop: w.crop, color: (meta && meta.color) || '#639922', label: gl, prefix: w.prefix, surveyDates: [todayStr()], traits: traits, lines: lines });
     });
     if (!newGens.length) { toast('등록할 계통이 없습니다'); return; }
     S.gens = newGens.concat(S.gens);
@@ -509,14 +530,27 @@
 
   // ---------- HOME ----------
   function renderSyncStat(el) {
-    var online = navigator.onLine;
-    if (S.syncing) { el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-upload', '#3B6D11', 24) + txt('동기화 중…', '#27500A', '전송하고 있습니다'); return; }
-    if (!online) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-off', '#B0721A', 24) + txt('오프라인 · 미전송 ' + S.pending + '건', '#8A5A12', '연결되면 자동으로 올라갑니다') + right(S.lastSaved ? tm(S.lastSaved) + ' 저장' : '', '#A67B2E'); return; }
-    if (S.pending > 0) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-upload', '#B0721A', 24) + txt('미전송 ' + S.pending + '건', '#8A5A12', '탭하여 지금 동기화') + right('▸', '#A67B2E'); return; }
-    el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-check', '#3B6D11', 24) + txt('동기화됨', '#27500A', S.lastSync ? tm(S.lastSync) + ' · 시트 반영' : '전송할 항목 없음') + right('✓', '#3B6D11');
+    var online = navigator.onLine, on = S.settings.syncOn !== false;
+    if (!on) { el.style.cssText = base('#F1F2EF', '#D8DCD3'); el.innerHTML = ico('cloud-off', '#8C9583', 24) + txt('동기화 꺼짐', '#59634F', '기기에만 저장됩니다 · 미전송 ' + S.pending + '건') + sw(false); wire(); return; }
+    if (S.syncing) { el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-upload', '#3B6D11', 24) + txt('동기화 중…', '#27500A', '전송하고 있습니다') + sw(true); wire(); return; }
+    if (!online) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-off', '#B0721A', 24) + txt('오프라인 · 미전송 ' + S.pending + '건', '#8A5A12', '연결되면 자동으로 올라갑니다') + sw(true); wire(); return; }
+    if (S.pending > 0) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-upload', '#B0721A', 24) + txt('미전송 ' + S.pending + '건', '#8A5A12', '탭하여 지금 동기화') + sw(true); wire(); return; }
+    el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-check', '#3B6D11', 24) + txt('동기화됨', '#27500A', S.lastSync ? tm(S.lastSync) + ' · 시트 반영' : '전송할 항목 없음') + sw(true); wire();
     function base(bg, bd) { return 'margin:4px 14px 0;padding:12px 13px;border-radius:12px;display:flex;align-items:center;gap:11px;cursor:pointer;background:' + bg + ';border:0.5px solid ' + bd; }
     function txt(a, c, b) { return '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:' + c + '">' + a + '</div><div style="font-size:11px;color:' + c + ';opacity:.8;margin-top:1px">' + b + '</div></div>'; }
-    function right(t, c) { return '<span style="font-size:12px;color:' + c + '">' + t + '</span>'; }
+    function sw(isOn) { return '<div class="sw' + (isOn ? ' on' : '') + '" id="syncSw" style="flex:0 0 auto"><div class="knob"></div></div>'; }
+    function wire() {
+      var b = document.getElementById('syncSw'); if (!b) return;
+      b.onclick = function (e) {
+        e.stopPropagation();
+        S.settings.syncOn = (S.settings.syncOn === false);
+        kvSet('settings', S.settings).then(function () {
+          renderSyncStat(el);
+          if (S.settings.syncOn !== false) { toast('동기화 켜짐'); if (navigator.onLine && S.settings.syncUrl && S.pending > 0) trySync(true); }
+          else toast('동기화 꺼짐 · 기기에만 저장');
+        });
+      };
+    }
   }
   function ico(name, color, size) { return '<i class="ti ti-' + name + '" style="font-size:' + (size || 16) + 'px;color:' + color + '"></i>'; }
   function tm(ts) { var d = new Date(ts); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
@@ -526,6 +560,19 @@
       '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button></div>';
   }
   function selectGen(i) { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var g = curGen(); S.date = g.surveyDates[g.surveyDates.length - 1]; S.trait = g.traits[0].id; loadVals().then(function () { go('collect'); }); }
+  function deleteProject(key) {
+    var p = projectOf(key); if (!p) return;
+    if (!confirm('"' + p.name + '" 과제를 삭제할까요?\n세대 ' + p.items.length + '개와 수집한 데이터가 모두 삭제됩니다.')) return;
+    var ids = p.items.map(function (it) { return it.g.id; });
+    S.gens = S.gens.filter(function (g) { return ids.indexOf(g.id) < 0; });
+    if (S.genIdx >= S.gens.length) S.genIdx = Math.max(0, S.gens.length - 1);
+    obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (ids.indexOf(r.genId) >= 0) st.delete(r.k); }); });
+    kvSet('gens', S.gens).then(function () {
+      if (S.gens.length) { var g2 = curGen(); S.lineIdx = 0; S.indiv = 1; S.date = g2.surveyDates[g2.surveyDates.length - 1]; S.trait = g2.traits[0] ? g2.traits[0].id : null; }
+      loadVals().then(function () { updatePending(); go('home'); });
+    });
+    toast('과제 삭제됨');
+  }
   function deleteGen(i) {
     var g = S.gens[i]; if (!g) return;
     if (!confirm('"' + g.projName + ' · ' + g.label + '"을(를) 삭제할까요?\n수집한 데이터도 함께 삭제됩니다.')) return;
@@ -537,6 +584,36 @@
       loadVals().then(function () { updatePending(); go('home'); });
     });
     toast('삭제됨');
+  }
+  function addGenPopup(projKey, fromIdx) {
+    var p = projectOf(projKey), src = S.gens[fromIdx];
+    var used = p.items.map(function (it) { return it.g.label; });
+    var avail = GEN_ORDER.filter(function (x) { return used.indexOf(x) < 0; });
+    if (!avail.length) { toast('추가할 세대가 없습니다'); return; }
+    openOverlay(
+      '<div class="ovl-title">세대 추가</div>' +
+      '<div class="ovl-msg">이 과제에 추가할 세대를 고르세요. 형질세트와 포장 정보는 <b>' + esc(src.label) + '</b>에서 복사됩니다.</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">' + avail.map(function (x) { return '<button class="pill agchip" data-g="' + x + '">' + x + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(x) + '</span></button>'; }).join('') + '</div>' +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:14px"><span style="font-size:12px;color:var(--text-secondary)">계통 수</span><input class="ein" id="agN" type="number" value="' + src.lines.length + '" style="height:40px;width:96px;text-align:center"></div>' +
+      '<div class="ovl-btns"><button class="btn" id="agCancel">취소</button><button class="btn primary" id="agOk">추가</button></div>'
+    );
+    var pick = null;
+    document.querySelectorAll('.agchip').forEach(function (b) { b.onclick = function () { pick = b.getAttribute('data-g'); document.querySelectorAll('.agchip').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }; });
+    $('agCancel').onclick = closeOverlay;
+    $('agOk').onclick = function () {
+      if (!pick) { toast('세대를 선택하세요'); return; }
+      var n = parseInt($('agN').value) || src.lines.length;
+      var base = Date.now(), lines = [];
+      for (var k = 0; k < n; k++) {
+        var num = String(k + 1).padStart(4, '0');
+        lines.push({ id: 'L' + String(k + 1).padStart(3, '0'), label: (src.prefix || yy()) + '-' + num, rep: (src.lines[k] && src.lines[k].rep) || ((k % 3) + 1), block: 'B-' + (((src.lines[k] && src.lines[k].rep) || ((k % 3) + 1))), zone: (src.lines[0] && src.lines[0].zone) || 'A동', row: Math.floor(k / 10) + 1, col: (k % 10) + 1, indivTotal: (src.lines[0] ? src.lines[0].indivTotal : 10), selected: false });
+      }
+      var ng = { id: 'G' + base, projId: projKeyOf(src), projName: src.projName, crop: src.crop, color: src.color, label: pick, prefix: src.prefix, surveyDates: [todayStr()], traits: JSON.parse(JSON.stringify(src.traits)), lines: lines };
+      S.gens.splice(fromIdx + 1, 0, ng);
+      if (S.genIdx > fromIdx) S.genIdx++;
+      closeOverlay();
+      kvSet('gens', S.gens).then(function () { S.editIdx = fromIdx + 1; renderGenEdit(); toast(pick + ' 세대 추가됨'); });
+    };
   }
   function renderGenEdit() {
     var i = S.editIdx, g = S.gens[i]; if (!g) { go('home'); return; }
@@ -554,14 +631,22 @@
         '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="indivTotal" type="number" value="' + (l.indivTotal || '') + '" style="width:52px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 4px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
         '<td style="padding:3px 2px"><button class="btn geLdel" data-i="' + li + '" style="width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 14) + '</button></td></tr>';
     }).join('');
+    var proj = projectOf(projKeyOf(g)) || { items: [{ g: g, idx: i }], name: g.projName };
+    var genBar = '<div style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">세대 <b style="color:var(--text-primary)">' + proj.items.length + '</b>개 · 편집할 세대 선택</span><button class="btn" id="geAddGen" style="height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 13) + ' 세대 추가</button></div>' +
+      '<div class="scroll-x" style="gap:6px">' + proj.items.map(function (it) {
+        var on = it.idx === i;
+        return '<button class="pill gegen' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
+      }).join('') + '</div></div>';
     v.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · 계통 ' + g.lines.length + '</div></div></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · 세대 ' + proj.items.length + ' · 편집 중 ' + esc(g.label) + '</div></div></div>' +
       '<div style="flex:1;padding:16px 14px;overflow:auto">' +
-        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명</label><input class="ein" id="geName" style="margin-top:6px" value="' + esc(g.projName) + '">' +
+        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></label><input class="ein" id="geName" style="margin-top:6px" value="' + esc(g.projName) + '">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">포장 / 구역</label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
+        genBar +
         // traits
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개</span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개 <span style="color:var(--text-muted);font-weight:400">· ' + esc(g.label) + '</span></span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
         '<div style="max-height:132px;overflow:auto;border:0.5px solid var(--border);border-radius:10px;padding:9px 9px 3px">' + (traitTags || '<span style="font-size:12px;color:var(--text-muted)">형질이 없습니다</span>') + '</div>' +
+        (proj.items.length > 1 ? '<button class="btn" id="geTraitAll" style="width:100%;height:38px;font-size:12px;margin-top:8px;color:var(--text-secondary)">이 형질세트를 과제의 모든 세대에 적용</button>' : '') +
         // lines table
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">등록 조합·계통 <b style="color:var(--text-primary)">' + g.lines.length + '</b></span><button class="btn" id="geBulk" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('table', 'var(--text-primary)', 14) + ' 일괄등록</button></div>' +
         '<div style="max-height:300px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
@@ -569,7 +654,9 @@
         '</div>' +
         '<button class="btn" id="geLadd" style="width:100%;height:40px;font-size:13px;margin-top:8px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 계통 추가</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">표에서 직접 수정할 수 있습니다. 세대를 다르게 적으면 저장 시 해당 세대 과제로 분리됩니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
-        '<button class="btn" id="geDel" style="width:100%;height:46px;font-size:14px;margin-top:20px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('trash', '#C0392B', 16) + ' 이 과제 삭제</button>' +
+        '<div style="display:flex;gap:8px;margin-top:20px">' +
+          (proj.items.length > 1 ? '<button class="btn" id="geDelGen" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' ' + esc(g.label) + ' 세대 삭제</button>' : '') +
+          '<button class="btn" id="geDel" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' 과제 전체 삭제</button></div>' +
       '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="geSave" style="width:100%;height:48px;font-size:15px">저장</button></div>';
     function collect() {
@@ -584,12 +671,23 @@
     $('geBack').onclick = function () { go('home'); };
     $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
     $('geBulk').onclick = function () { collect(); S.bulkIdx = i; S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; go('bulk'); };
-    $('geDel').onclick = function () { deleteGen(i); };
+    $('geDel').onclick = function () { deleteProject(projKeyOf(g)); };
+    if ($('geDelGen')) $('geDelGen').onclick = function () { collect(); deleteGen(i); };
+    v.querySelectorAll('.gegen').forEach(function (b) { b.onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.editIdx = +b.getAttribute('data-i'); renderGenEdit(); }); }; });
+    $('geAddGen').onclick = function () { addGenPopup(projKeyOf(g), i); };
+    if ($('geTraitAll')) $('geTraitAll').onclick = function () {
+      if (!confirm('현재 형질세트를 이 과제의 모든 세대에 적용할까요?\n각 세대의 기존 형질 구성은 대체됩니다(입력값은 유지).')) return;
+      var pj = projectOf(projKeyOf(g));
+      pj.items.forEach(function (it) { if (it.g.id !== g.id) it.g.traits = JSON.parse(JSON.stringify(g.traits)); });
+      kvSet('gens', S.gens).then(function () { toast('모든 세대에 적용됨'); });
+    };
     $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
     v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } if (!confirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.')) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }; });
     $('geSave').onclick = function () {
       collect();
-      g.projName = $('geName').value.trim() || g.projName;
+      var newName = $('geName').value.trim() || g.projName;
+      var pk = projKeyOf(g);
+      S.gens.forEach(function (x) { if (projKeyOf(x) === pk) x.projName = newName; });
       var zn = $('geZone').value.trim(); if (zn) g.lines.forEach(function (l) { l.zone = zn; });
       splitGenByLabel(g, i).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대별로 분리' : '저장됨'); go('home'); }); });
     };
@@ -606,7 +704,7 @@
     keys.forEach(function (gl, n) {
       if (gl === keepLabel) return;
       var lines = groups[gl].map(function (l, li) { var c = JSON.parse(JSON.stringify(l)); delete c.gen; c.id = 'L' + String(li + 1).padStart(3, '0'); c.row = Math.floor(li / 10) + 1; c.col = (li % 10) + 1; return c; });
-      extras.push({ id: 'G' + base + '_' + n, projName: g.projName, crop: g.crop, color: g.color, label: gl, prefix: g.prefix, surveyDates: g.surveyDates.slice(), traits: JSON.parse(JSON.stringify(g.traits)), lines: lines });
+      extras.push({ id: 'G' + base + '_' + n, projId: projKeyOf(g), projName: g.projName, crop: g.crop, color: g.color, label: gl, prefix: g.prefix, surveyDates: g.surveyDates.slice(), traits: JSON.parse(JSON.stringify(g.traits)), lines: lines });
     });
     // move observations of relocated lines to the new gen ids
     var lineToGen = {}; extras.forEach(function (ng) { ng.lines.forEach(function (l) { lineToGen[l.label] = ng.id; }); });
@@ -652,17 +750,32 @@
         stat(g.lines.length, '계통') + stat(g.lines.filter(function (x) { return x.selected; }).length, '선발 계통') + statP() +
       '</div>' +
       '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span><button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button></div>' +
-        S.gens.map(function (gg, i) { return '<div class="hgenrow" style="display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:11px;margin-bottom:8px;border:0.5px solid ' + (i === S.genIdx ? '#639922' : 'var(--border-strong)') + ';background:' + (i === S.genIdx ? '#F7FAF2' : 'var(--surface-2)') + '"><div style="width:4px;height:34px;border-radius:2px;background:' + (gg.color || '#639922') + '"></div><div class="hgenopen" data-i="' + i + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(gg.projName) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(gg.label) + ' · ' + esc(gg.crop) + ' · ' + gg.lines.length + ' 계통</div></div><button class="btn hgenedit" data-i="' + i + '" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button><button class="btn hgendel" data-i="' + i + '" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button></div>'; }).join('') +
+        projects().map(function (p) {
+          var cur = p.id === curProjKey();
+          return '<div style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px">' +
+            '<div style="display:flex;align-items:center;gap:9px">' +
+              '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
+              '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(p.crop) + ' · 세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
+              '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
+              '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
+            '</div>' +
+            '<div class="scroll-x" style="gap:6px;margin-top:9px">' + p.items.map(function (it) {
+              var on = it.idx === S.genIdx;
+              return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
+            }).join('') + '</div>' +
+          '</div>';
+        }).join('') +
       '</div>' +
       '<div style="height:20px"></div>';
     renderSyncStat($('syncStat'));
-    $('syncStat').onclick = function () { trySync(false); };
+    $('syncStat').onclick = function () { if (S.settings.syncOn === false) { toast('동기화가 꺼져 있습니다 · 오른쪽 스위치로 켜세요'); return; } trySync(false); };
     $('hGear').onclick = function () { go('settings'); };
     $('hResume').onclick = function () { go('collect'); };
     $('hNew').onclick = function () { startNew(); };
-    document.querySelectorAll('.hgenopen').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
-    document.querySelectorAll('.hgenedit').forEach(function (b) { b.onclick = function () { S.editIdx = +b.getAttribute('data-i'); go('genedit'); }; });
-    document.querySelectorAll('.hgendel').forEach(function (b) { b.onclick = function () { deleteGen(+b.getAttribute('data-i')); }; });
+    document.querySelectorAll('.hprojopen').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) selectGen(p.items[0].idx); }; });
+    document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
+    document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; go('genedit'); } }; });
+    document.querySelectorAll('.hprojdel').forEach(function (b) { b.onclick = function () { deleteProject(b.getAttribute('data-p')); }; });
     function stat(n, label) { return '<div style="flex:1;background:var(--surface-1);border-radius:11px;padding:10px 11px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
     function statP() { return '<div style="flex:1;background:#FAEEDA;border-radius:11px;padding:10px 11px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
   }
@@ -683,6 +796,7 @@
           '<span style="font-size:10px;color:var(--text-success)">' + ico('device-floppy', 'var(--text-success)', 12) + ' ' + (S.lastSaved ? tm(S.lastSaved) + ' 저장' : '자동저장') + '</span>' +
         '</div>' +
       '</div>' +
+      '<div id="cGenBar" style="padding:8px 12px 0"></div>' +
       '<div id="cMapWrap" class="hidden" style="margin:10px 14px 0"></div>' +
       // card
       '<div id="cCard" style="margin:12px 14px 0"></div>' +
@@ -706,7 +820,7 @@
           '<button class="btn" id="cNext" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">다음 라벨번호 ' + ico('chevron-right', 'var(--text-primary)', 16) + '</button>' +
         '</div>' +
       '</div>';
-    renderCard(); renderDate(); renderPills(); renderInput(); renderHist(); renderMap();
+    renderCard(); renderDate(); renderPills(); renderInput(); renderHist(); renderMap(); renderGenBar();
     $('cNum').textContent = '개체 ' + S.indiv + '/' + total();
     $('cBack').onclick = function () { go('home'); };
     $('cMap').onclick = function () { S.showMap = !S.showMap; $('cMapWrap').classList.toggle('hidden', !S.showMap); };
@@ -726,6 +840,25 @@
     if (S.view !== 'collect' || S.traitEdit) return;
     renderCard(); renderInput(); renderHist(); renderMap();
     var n = $('cNum'); if (n) n.textContent = '개체 ' + S.indiv + '/' + total();
+  }
+  function renderGenBar() {
+    var bar = $('cGenBar'); if (!bar) return;
+    var p = projectOf(curProjKey());
+    if (!p || p.items.length < 2) { bar.innerHTML = ''; bar.style.padding = '0'; return; }
+    bar.style.padding = '8px 12px 0';
+    bar.innerHTML = '<div class="scroll-x" style="gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">세대</span>' +
+      p.items.map(function (it) {
+        var on = it.idx === S.genIdx;
+        return '<button class="pill cgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + '</span></button>';
+      }).join('') + '</div>';
+    bar.querySelectorAll('.cgenchip').forEach(function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-i'); if (i === S.genIdx) return;
+        S.genIdx = i; S.lineIdx = 0; S.indiv = 1;
+        var g2 = curGen(); S.date = g2.surveyDates[g2.surveyDates.length - 1]; S.trait = g2.traits[0] ? g2.traits[0].id : null;
+        loadVals().then(function () { renderCollect(); });
+      };
+    });
   }
   function moveIndiv(d) {
     var nv = Math.max(1, Math.min(total(), S.indiv + d));
@@ -800,7 +933,7 @@
       html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', '#3B6D11', 11) : '') + '</button>';
     });
     html += '<button class="btn" id="cNewDate" style="padding:5px 10px;font-size:12px;border-radius:16px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 13) + ' 새 조사</button></div>' +
-      '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 수정·삭제할 수 있어요 · 시계열 형질(' + ico('clock', '#3B6D11', 10) + ')만 조사일마다 저장</div>';
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 수정·삭제할 수 있어요 · 시계열(' + ico('clock', '#3B6D11', 10) + ')은 조사일마다 저장, 1회성은 마지막 측정 조사일 기록</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
     $('cNewDate').onclick = function () { newDatePopup(); };
@@ -863,7 +996,7 @@
     obsAll().then(function (all) {
       return new Promise(function (res) {
         var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
-        all.forEach(function (r) { if (r.genId === g.id && r.date === d) st.delete(r.k); });
+        all.forEach(function (r) { if (r.genId !== g.id || r.date !== d) return; if (recSeries(r)) st.delete(r.k); else { r.date = ''; r.dirty = 1; r.updatedAt = Date.now(); st.put(r); } });
         tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
       });
     }).then(function () { return kvSet('gens', S.gens); }).then(function () { return loadVals(); }).then(function () { updatePending(); renderCollect(); toast('조사일 삭제됨 · ' + d); });
@@ -892,7 +1025,7 @@
     obsAll().then(function (all) {
       return new Promise(function (res) {
         var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
-        all.forEach(function (r) { if (r.genId === g.id && r.date === oldD) { st.delete(r.k); r.k = r.k.replace('@' + oldD, '@' + newD); r.date = newD; r.dirty = 1; r.updatedAt = Date.now(); st.put(r); } });
+        all.forEach(function (r) { if (r.genId === g.id && r.date === oldD) { if (recSeries(r)) { st.delete(r.k); r.k = r.k.replace('@' + oldD, '@' + newD); } r.date = newD; r.dirty = 1; r.updatedAt = Date.now(); st.put(r); } });
         tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
       });
     }).then(function () { return kvSet('gens', S.gens); }).then(function () { return loadVals(); }).then(function () { updatePending(); renderCollect(); toast('조사일 수정됨 · ' + newD); });
@@ -1588,16 +1721,16 @@
     var html = '<div class="card" style="margin:0 0 10px"><div style="display:flex;gap:6px;flex-wrap:wrap">' +
       stcell('개체 수', n) + stcell('평균', round(mean, 2) + (t.unit && t.unit !== '%' ? '' : (t.unit || ''))) + stcell('표준편차', round(sd, 2)) + stcell('범위', round(mn, 1) + '–' + round(mx, 1)) + stcell('CV%', round(cv, 1)) + '</div></div>';
     if (an) {
-      html += '<div class="card" style="margin:0 0 10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('chart-bar', '#639922', 14) + ' 분산분석 · 유전력 <span style="font-size:10px;color:var(--text-muted);font-weight:400">(계통 효과 · 개체 반복)</span></div><div style="font-size:13px;line-height:2;color:var(--text-secondary)">F = <b style="color:var(--text-primary)">' + round(an.F, 2) + '</b> · p = <b style="color:' + (an.p < 0.05 ? '#3B6D11' : 'var(--text-primary)') + '">' + (an.p < 0.001 ? '<0.001' : round(an.p, 3)) + '</b>' + (an.p < 0.05 ? ' <span style="color:#3B6D11">계통 간 유의차</span>' : ' <span style="color:var(--text-muted)">유의차 없음</span>') + '<br>오차 MSe = ' + round(an.mse, 2) + ' · CV% = ' + round(an.cv, 1) + '<br>유전력 H² <span style="font-size:10px;color:var(--text-muted)">(개체평균 기준)</span> = <b style="color:#27500A">' + round(Math.max(0, Math.min(1, an.h2)), 2) + '</b></div></div>';
+      html += '<div class="card" style="margin:0 0 10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('chart-bar', '#639922', 14) + ' 분산분석 · 유전력 <span style="font-size:10px;color:var(--text-muted);font-weight:400">(라벨번호 효과 · 개체 반복)</span></div><div style="font-size:13px;line-height:2;color:var(--text-secondary)">F = <b style="color:var(--text-primary)">' + round(an.F, 2) + '</b> · p = <b style="color:' + (an.p < 0.05 ? '#3B6D11' : 'var(--text-primary)') + '">' + (an.p < 0.001 ? '<0.001' : round(an.p, 3)) + '</b>' + (an.p < 0.05 ? ' <span style="color:#3B6D11">라벨번호 간 유의차</span>' : ' <span style="color:var(--text-muted)">유의차 없음</span>') + '<br>오차 MSe = ' + round(an.mse, 2) + ' · CV% = ' + round(an.cv, 1) + '<br>유전력 H² <span style="font-size:10px;color:var(--text-muted)">(개체평균 기준)</span> = <b style="color:#27500A">' + round(Math.max(0, Math.min(1, an.h2)), 2) + '</b></div></div>';
     } else {
-      html += '<div class="card" style="margin:0 0 10px;font-size:12px;color:var(--text-muted);line-height:1.6">계통당 개체(반복)가 부족해 분산분석·유전력은 계산할 수 없습니다. 계통당 2개 이상 개체를 입력하면 F·p·H²·Tukey가 표시됩니다.</div>';
+      html += '<div class="card" style="margin:0 0 10px;font-size:12px;color:var(--text-muted);line-height:1.6">라벨번호당 개체(반복)가 부족해 분산분석·유전력은 계산할 수 없습니다. 라벨번호당 2개 이상 개체를 입력하면 F·p·H²·Tukey가 표시됩니다.</div>';
     }
-    html += '<div style="font-size:12px;font-weight:600;margin:4px 0 8px">계통 순위 <span style="font-size:10px;color:var(--text-muted);font-weight:400">평균 내림차순' + (letters.some(function (x) { return x; }) ? ' · 같은 문자=Tukey 유의차 없음' : '') + '</span></div>';
+    html += '<div style="font-size:12px;font-weight:600;margin:4px 0 8px">라벨번호 순위 <span style="font-size:10px;color:var(--text-muted);font-weight:400">평균 내림차순' + (letters.some(function (x) { return x; }) ? ' · 같은 문자=Tukey 유의차 없음' : '') + '</span></div>';
     html += ranked.map(function (o, i) {
       var w = maxM > minM ? ((o.mean - minM) / (maxM - minM) * 94 + 6) : 100; var sel = o.line.selected;
       return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:74px;flex:0 0 auto;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + (sel ? 'color:#27500A;font-weight:600' : '') + '">' + (sel ? '<i class="ti ti-star-filled" style="font-size:11px;color:#C08A2B"></i> ' : '') + esc(o.line.label) + '</div><div style="flex:1;height:20px;background:var(--surface-1);border-radius:5px;overflow:hidden"><div style="width:' + w + '%;height:100%;background:' + (sel ? '#C08A2B' : '#639922') + '"></div></div><div style="width:78px;flex:0 0 auto;text-align:right;font-size:12px">' + round(o.mean, 1) + ' <b style="color:#3B6D11">' + letters[i] + '</b></div></div>';
     }).join('');
-    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">계통 ' + ranked.length + '개 · 선발 ' + ranked.filter(function (o) { return o.line.selected; }).length + '개 · 결측·복잡한 설계는 CSV로 내보내 R에서 분석 권장</div>';
+    html += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">라벨번호 ' + ranked.length + '개 · 선발 ' + ranked.filter(function (o) { return o.line.selected; }).length + '개 · 결측·복잡한 설계는 CSV로 내보내 R에서 분석 권장</div>';
     body.innerHTML = html;
   }
   function renderCategory(body, t, byLine) {
@@ -2146,8 +2279,8 @@
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +
         '<button class="btn" id="eZip" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('photo', 'var(--text-primary)', 20) + ' 사진 ZIP 내보내기</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>CropMemo / ' + esc(g.projName) + ' /</b> 폴더 구조의 ZIP 하나로 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다. 저장 후 드라이브·메일로 공유하세요.</div>' +
-        '<button class="btn" id="eSync" style="width:100%;height:48px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:10px">' + ico('cloud-upload', 'var(--text-primary)', 18) + ' 지금 동기화 (시트로 전송)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">동기화는 설정에서 Apps Script URL을 입력해야 동작합니다. CSV는 오프라인에서도 바로 저장됩니다.</div>' +
+        '<button class="btn" id="eSync" style="width:100%;height:48px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:10px">' + ico('cloud-upload', 'var(--text-primary)', 18) + ' 지금 동기화 (CSV, 사진 전송)</button>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">동기화하면 구글 드라이브 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 설정에서 Apps Script URL을 입력해야 동작하며, 홈의 스위치가 꺼져 있으면 전송되지 않습니다. CSV 내려받기는 오프라인에서도 됩니다.</div>' +
       '</div>';
     $('eCsv').onclick = function () { exportCSV(); };
     $('ePhotos').onclick = function () { exportPhotoFiles(); };
@@ -2225,19 +2358,39 @@
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택 · SYNC_TOKEN과 일치)</span></label>' +
         '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">기기 ID: ' + esc(st.deviceId) + '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">동기화 사용</div><div style="font-size:11px;color:var(--text-muted)">끄면 기기에만 저장됩니다 (홈에서도 전환 가능)</div></div><div class="sw' + (st.syncOn !== false ? ' on' : '') + '" id="sSyncOn"><div class="knob"></div></div></div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">진동 피드백</div><div style="font-size:11px;color:var(--text-muted)">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>' +
         '<div style="display:flex;gap:10px;margin-top:16px">' +
           '<button class="btn" id="sPing" style="flex:1;height:46px;font-size:14px">연결 테스트</button>' +
           '<button class="btn primary" id="sSave" style="flex:1;height:46px;font-size:14px">저장</button>' +
         '</div>' +
         '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('cloud-upload', '#639922', 15) + ' 동기화 방법</div>' +
+        '<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
+          '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
+          '<b>1.</b> 아래에서 <b>GAS 코드</b>를 내려받습니다.<br>' +
+          '<b>2.</b> 브라우저에서 <b>sheets.new</b> 로 새 시트를 만들고 <b>확장 프로그램 → Apps Script</b> 를 엽니다.<br>' +
+          '<b>3.</b> 기본 코드를 지우고 내려받은 코드를 <b>붙여넣기</b> 한 뒤, <b>setup</b> 함수를 한 번 실행해 권한을 승인합니다.<br>' +
+          '<b>4.</b> <b>배포 → 새 배포 → 웹 앱</b>, 액세스 권한을 <b>모든 사용자</b>로 두고 배포합니다.<br>' +
+          '<b>5.</b> 생성된 <b>/exec 주소</b>를 위 <b>동기화 URL</b> 칸에 붙여넣고 저장 → <b>연결 테스트</b>로 확인합니다.' +
+        '</div>' +
+        '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">코드를 수정해 배포하면 저장 폴더 이름(CropMemo)도 바꿀 수 있습니다. 동기화를 쓰지 않으려면 홈 화면의 스위치를 꺼두세요.</div>' +
+        '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
         '<div style="font-size:13px;font-weight:600;margin-bottom:6px">데이터</div>' +
         '<div style="font-size:12px;color:var(--text-secondary)">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + '</div>' +
         '<button class="btn" id="sReset" style="width:100%;height:44px;font-size:13px;margin-top:12px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:18px;line-height:1.7">Crop Memo Pro · 오프라인 우선 PWA<br>현장에서 인터넷 없이 저장되고, 연결되면 Google Sheets로 동기화됩니다.</div>' +
       '</div>';
-    $('sSave').onclick = function () { st.syncUrl = $('sUrl').value.trim(); st.token = $('sTok').value.trim(); kvSet('settings', st).then(function () { toast('저장됨'); if (navigator.onLine && st.syncUrl) trySync(true); }); };
+    $('sSave').onclick = function () { st.syncUrl = $('sUrl').value.trim(); st.token = $('sTok').value.trim(); kvSet('settings', st).then(function () { toast('저장됨'); if (navigator.onLine && st.syncOn !== false && st.syncUrl) trySync(true); }); };
     $('sPing').onclick = function () { S.settings.syncUrl = $('sUrl').value.trim(); pingSync(); };
+    $('sGas').onclick = function () {
+      toast('코드 준비 중…');
+      fetch('./CropMemoPro_GAS_Code.gs').then(function (r) { if (!r.ok) throw 0; return r.text(); })
+        .then(function (txt) { downloadBlob(new Blob([txt], { type: 'text/plain;charset=utf-8' }), 'CropMemoPro_GAS_Code.gs'); toast('GAS 코드 내려받음'); })
+        .catch(function () { toast('코드를 불러오지 못했습니다 · 온라인에서 한 번 실행해 주세요'); });
+    };
+    $('sSyncOn').onclick = function () { st.syncOn = (st.syncOn === false); this.classList.toggle('on', st.syncOn !== false); kvSet('settings', st).then(function () { toast(st.syncOn !== false ? '동기화 켜짐' : '동기화 꺼짐'); }); };
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     $('sReset').onclick = async function () {
       if (!confirm('모든 로컬 데이터를 삭제할까요? (되돌릴 수 없습니다)')) return;
@@ -2247,14 +2400,17 @@
   }
 
   // ---------- net ----------
-  function onNet() { if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncUrl && S.pending > 0) trySync(true); }
+  function onNet() { if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
 
   // ---------- boot ----------
   async function boot() {
     try {
       DB = await idb();
       var gens = await kvGet('gens'); if (!gens) { gens = seedGens(); await kvSet('gens', gens); }
+      var mig = false;
+      gens.forEach(function (g) { if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; } });
       S.gens = gens;
+      if (mig) await kvSet('gens', gens);
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
       if (!S.settings.deviceId) S.settings.deviceId = 'dev-' + Math.random().toString(36).slice(2, 8);
       S.indivSel = await kvGet('indivSel') || {};
@@ -2268,7 +2424,7 @@
       window.addEventListener('online', onNet); window.addEventListener('offline', onNet);
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
       go('home');
-      if (navigator.onLine && S.settings.syncUrl) trySync(true);
+      if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl) trySync(true);
     } catch (err) { showBootError(err); }
   }
   function showBootError(err) {
