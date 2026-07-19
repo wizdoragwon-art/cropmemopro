@@ -879,13 +879,13 @@
     el.addEventListener('touchend', function (e) { if (x0 == null) return; var t = e.changedTouches && e.changedTouches[0]; var dx = t ? t.clientX - x0 : 0, dy = t ? t.clientY - y0 : 0, dt = Date.now() - t0; x0 = null;
       if (sw && dt < 800) {
         if (dir === 'h' && Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) { e.preventDefault(); trig(dx); }
-        else if (dir === 'v' && cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { e.preventDefault(); haptic(15); cbV(dy < 0 ? -1 : 1); }
+        else if (dir === 'v' && cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { e.preventDefault(); haptic(15); cbV(dy < 0 ? 1 : -1); }
       }
       sw = false; dir = null; }, { passive: false });
     el.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') return; x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); });
     el.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') return; if (x0 == null) return; var dx = e.clientX - x0, dy = e.clientY - y0, dt = Date.now() - t0; x0 = null; if (dt >= 800) return;
       if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.3) trig(dx);
-      else if (cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { haptic(15); cbV(dy < 0 ? -1 : 1); }
+      else if (cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { haptic(15); cbV(dy < 0 ? 1 : -1); }
     });
   }
   function moveLine(d) {
@@ -1428,7 +1428,7 @@
   function facetValues(t, mode, lv) {
     var g = curGen(), out = [];
     g.lines.forEach(function (l) {
-      if (!lineInFacet(l, mode, lv.key)) return;
+      if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
         var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
@@ -1440,7 +1440,7 @@
   function facetPairs(tx, ty, mode, lv) {
     var g = curGen(), pts = [];
     g.lines.forEach(function (l) {
-      if (!lineInFacet(l, mode, lv.key)) return;
+      if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
         var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + dt) : '');
@@ -1454,7 +1454,7 @@
   function facetBoxGroups(t, gmode, mode, lv) {
     var g = curGen(), map = {}, order = [];
     g.lines.forEach(function (l) {
-      if (!lineInFacet(l, mode, lv.key)) return;
+      if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
         var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
@@ -1508,6 +1508,7 @@
   function pairedPoints(tx, ty) {
     var g = curGen(), pts = [];
     g.lines.forEach(function (l) {
+      if (!lineIncluded(l)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + S.date) : '');
         var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + (ty.series ? ('@' + S.date) : '');
@@ -1520,6 +1521,7 @@
   function boxGroups(t, mode) {
     var g = curGen(), map = {}, order = [];
     g.lines.forEach(function (l) {
+      if (!lineIncluded(l)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : '');
         var v = parseFloat(S.vals[k]); if (isNaN(v)) continue;
@@ -1657,6 +1659,27 @@
   }
 
   // ---------- ANALYSIS ----------
+  function anSelMap() { var g = curGen(); S.anSelByGen = S.anSelByGen || {}; if (!S.anSelByGen[g.id]) S.anSelByGen[g.id] = {}; return S.anSelByGen[g.id]; }
+  function lineIncluded(l) { if (S.anScope !== 'some') return true; return !!anSelMap()[l.id]; }
+  function anLineStats() {
+    var g = curGen(), t = traitById(S.anTrait), out = [];
+    g.lines.forEach(function (l) {
+      var n = 0;
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : '');
+        var v = S.vals[k]; if (v != null && v !== '') n++;
+      }
+      if (n) out.push({ line: l, n: n });
+    });
+    if (!out.length) {
+      g.lines.forEach(function (l) {
+        var any = 0;
+        g.traits.forEach(function (tt) { for (var iv = 1; iv <= l.indivTotal; iv++) { var k2 = g.id + ':' + l.id + ':' + iv + ':' + tt.id + (tt.series ? ('@' + S.date) : ''); if (S.vals[k2] != null && S.vals[k2] !== '') any++; } });
+        if (any) out.push({ line: l, n: any });
+      });
+    }
+    return out;
+  }
   function isMeasure(t) { return t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter' || (t.type === 'rating' && t.scale && typeof t.scale[0] === 'number'); }
   function renderAnalysis() {
     var g = curGen(), v = $('view-analysis');
@@ -1668,11 +1691,77 @@
         '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">요약 · 통계</button>' +
         '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">그래프 생성</button>' +
       '</div>' +
+      '<div style="display:flex;gap:8px;padding:8px 14px 2px;align-items:center">' +
+        '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">분석 대상</span>' +
+        '<button class="btn anScope" data-s="all" style="flex:1;height:34px;font-size:12px' + (S.anScope !== 'some' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">전체</button>' +
+        '<button class="btn anScope" data-s="some" style="flex:1;height:34px;font-size:12px' + (S.anScope === 'some' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">일부 선택</button>' +
+      '</div>' +
+      '<div id="anPick" style="padding:0 14px"></div>' +
       '<div class="scroll-x" id="anPills" style="padding:10px 14px 6px"></div>' +
       '<div id="anDate" style="padding:0 14px 4px"></div>' +
       '<div id="anBody" style="flex:1;padding:8px 14px 16px;overflow:auto"></div>';
     document.querySelectorAll('.anTab').forEach(function (b) { b.onclick = function () { S.anTab = b.getAttribute('data-t'); renderAnalysis(); }; });
+    document.querySelectorAll('.anScope').forEach(function (b) { b.onclick = function () {
+      var v2 = b.getAttribute('data-s');
+      if (v2 === 'some' && S.anScope !== 'some') { var m = anSelMap(); if (!Object.keys(m).length) anLineStats().forEach(function (r) { m[r.line.id] = 1; }); }
+      S.anScope = v2; renderAnalysis();
+    }; });
+    renderAnPick();
     renderAnPills(); renderAnDate(); renderAnBody();
+  }
+  function renderAnPick() {
+    var box = $('anPick'); if (!box) return;
+    if (S.anScope !== 'some') { box.innerHTML = ''; return; }
+    var rows = anLineStats(), sel = anSelMap();
+    var nSel = rows.filter(function (r) { return sel[r.line.id]; }).length;
+    if (!rows.length) { box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:10px 2px">조사된 라벨번호가 없습니다.</div>'; return; }
+    box.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px"><span style="font-size:11px;color:var(--text-secondary);flex:1">선택 <b style="color:#27500A">' + nSel + '</b> / ' + rows.length + ' · 행을 탭하거나 오른쪽 칸을 위아래로 <b>드래그</b></span>' +
+        '<button class="btn" id="anAll" style="height:28px;padding:0 9px;font-size:11px">전체선택</button><button class="btn" id="anNone" style="height:28px;padding:0 9px;font-size:11px">해제</button></div>' +
+      '<div style="max-height:190px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1">' +
+      '<th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:center;padding:6px 6px;width:64px">개체수</th><th style="text-align:center;padding:6px 6px;width:86px">분석 적용</th></tr></thead><tbody id="anPickBody">' +
+      rows.map(function (r, i) {
+        var on = !!sel[r.line.id];
+        return '<tr class="anRow" data-id="' + esc(r.line.id) + '" data-i="' + i + '" style="border-top:0.5px solid var(--border);background:' + (on ? '#F1F6E8' : 'transparent') + '">' +
+          '<td style="padding:7px 9px;font-weight:500' + (on ? ';color:#27500A' : '') + '">' + esc(r.line.label) + '</td>' +
+          '<td style="padding:7px 6px;text-align:center;color:var(--text-secondary)">' + r.n + '</td>' +
+          '<td class="anCell" data-id="' + esc(r.line.id) + '" style="padding:7px 6px;text-align:center;touch-action:none;cursor:pointer">' +
+            '<span style="display:inline-flex;width:22px;height:22px;border-radius:6px;align-items:center;justify-content:center;border:1.2px solid ' + (on ? '#639922' : 'var(--border-strong)') + ';background:' + (on ? '#639922' : 'var(--surface-2)') + ';color:#fff;font-size:13px">' + (on ? '✓' : '') + '</span></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    $('anAll').onclick = function () { rows.forEach(function (r) { sel[r.line.id] = 1; }); renderAnPick(); renderAnBody(); };
+    $('anNone').onclick = function () { rows.forEach(function (r) { delete sel[r.line.id]; }); renderAnPick(); renderAnBody(); };
+    function toggle(id, val) { if (val) sel[id] = 1; else delete sel[id]; }
+    function paint() {
+      box.querySelectorAll('.anRow').forEach(function (tr) {
+        var on = !!sel[tr.getAttribute('data-id')];
+        tr.style.background = on ? '#F1F6E8' : 'transparent';
+        var td = tr.querySelector('td'), span = tr.querySelector('.anCell span');
+        td.style.color = on ? '#27500A' : '';
+        span.style.borderColor = on ? '#639922' : 'var(--border-strong)';
+        span.style.background = on ? '#639922' : 'var(--surface-2)';
+        span.textContent = on ? '✓' : '';
+      });
+      var cnt = box.querySelector('b'); if (cnt) cnt.textContent = rows.filter(function (r) { return sel[r.line.id]; }).length;
+    }
+    // tap on a row toggles
+    box.querySelectorAll('.anRow').forEach(function (tr) {
+      tr.onclick = function (e) { if (e.target.closest && e.target.closest('.anCell')) return; var id = tr.getAttribute('data-id'); toggle(id, !sel[id]); paint(); renderAnBody(); };
+    });
+    // drag over the right column selects/deselects a range
+    var dragging = false, mode = true, changed = false;
+    function idAt(x, y) { var el = document.elementFromPoint(x, y); var cell = el && el.closest ? el.closest('.anCell') : null; return cell ? cell.getAttribute('data-id') : null; }
+    function start(x, y) { var id = idAt(x, y); if (!id) return; dragging = true; mode = !sel[id]; toggle(id, mode); changed = true; paint(); }
+    function move(x, y) { if (!dragging) return; var id = idAt(x, y); if (!id) return; if (!!sel[id] !== mode) { toggle(id, mode); changed = true; paint(); } }
+    function end() { if (!dragging) return; dragging = false; if (changed) { changed = false; renderAnBody(); } }
+    box.querySelectorAll('.anCell').forEach(function (c) {
+      c.addEventListener('pointerdown', function (e) { e.preventDefault(); start(e.clientX, e.clientY); });
+      c.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) { e.preventDefault(); start(t.clientX, t.clientY); } }, { passive: false });
+    });
+    box.addEventListener('pointermove', function (e) { if (dragging) { e.preventDefault(); move(e.clientX, e.clientY); } });
+    box.addEventListener('touchmove', function (e) { if (dragging) { var t = e.touches[0]; if (t) { e.preventDefault(); move(t.clientX, t.clientY); } } }, { passive: false });
+    document.addEventListener('pointerup', end);
+    document.addEventListener('touchend', end);
   }
   function renderAnPills() {
     var g = curGen(), p = $('anPills'); p.innerHTML = '';
@@ -1693,7 +1782,7 @@
   }
   function anGather(t) {
     var g = curGen(), out = [];
-    g.lines.forEach(function (l) { var vals = []; for (var iv = 1; iv <= l.indivTotal; iv++) { var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : ''); var raw = S.vals[k]; if (raw != null && raw !== '') vals.push(raw); } if (vals.length) out.push({ line: l, vals: vals }); });
+    g.lines.forEach(function (l) { if (!lineIncluded(l)) return; var vals = []; for (var iv = 1; iv <= l.indivTotal; iv++) { var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : ''); var raw = S.vals[k]; if (raw != null && raw !== '') vals.push(raw); } if (vals.length) out.push({ line: l, vals: vals }); });
     return out;
   }
   function renderAnBody() {
