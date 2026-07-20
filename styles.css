@@ -48,3 +48,71 @@ button{font-family:inherit;color:inherit}
 .scroll-x::-webkit-scrollbar{display:none}
 input,textarea,select{font-family:inherit}
 a{color:var(--green-d)}
+
+/* ===== 태블릿 · 큰 화면 대응 ===== */
+@media (min-width: 700px) {
+  #app { max-width: 760px; }
+  body { font-size: 15px; }
+  #cInput .grid { max-width: 460px; }          /* 키패드가 과하게 커지지 않도록 */
+  .tabbar .tab { font-size: 12px; padding: 10px 0 12px; }
+}
+@media (min-width: 1000px) {
+  #app { max-width: 1040px; }
+  /* 야장 수집: 왼쪽 입력 · 오른쪽 필드맵 2단 배치 */
+  #view-collect.mapon.on {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    grid-template-areas:
+      "head head"
+      "gen  map"
+      "card map"
+      "date map"
+      "pills map"
+      "input map"
+      "hist map"
+      "nav  nav";
+    align-content: start;
+  }
+  #view-collect.mapon.on > #cHead { grid-area: head; }
+  #view-collect.mapon.on > #cGenBar { grid-area: gen; }
+  #view-collect.mapon.on > #cMapWrap { grid-area: map; margin: 10px 14px 0 0; align-self: start; position: sticky; top: 8px; }
+  #view-collect.mapon.on > #cCard { grid-area: card; }
+  #view-collect.mapon.on > #cDate { grid-area: date; }
+  #view-collect.mapon.on > #cPills { grid-area: pills; }
+  #view-collect.mapon.on > #cInput { grid-area: input; }
+  #view-collect.mapon.on > #cHist { grid-area: hist; }
+  #view-collect.mapon.on > #cNav { grid-area: nav; }
+  /* 홈: 과제 목록을 2열로 */
+  #view-home .projgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #view-home .projgrid > div { margin-bottom: 0 !important; }
+}
+@media (min-width: 1280px) {
+  #app { max-width: 1200px; }
+  #view-collect.mapon.on { grid-template-columns: minmax(0, 1fr) 460px; }
+}
+
+/* ===== 태블릿·넓은 화면: 전체 폭 활용 ===== */
+@media (min-width: 720px) {
+  #app { max-width: 1000px; }
+  /* 야장 수집: 왼쪽 입력 / 오른쪽 필드맵 2단 */
+  #view-collect.on { display: flex; flex-wrap: wrap; align-content: flex-start; }
+  #view-collect > #cHead, #view-collect > #cGenBar, #view-collect > #cNav { width: 100%; }
+  #view-collect > #cMain { flex: 1 1 420px; min-width: 0; }
+  #view-collect > #cSide { flex: 0 1 400px; min-width: 0; align-self: flex-start; position: sticky; top: 6px; }
+  #view-collect:not(.mapOn) > #cSide { display: none; }
+  #cInput { min-height: 220px; }
+  .key { height: 54px; font-size: 19px; }
+  /* 홈: 통계 카드와 목록을 조금 크게 */
+  #view-home, #view-analysis, #view-export, #view-settings, #view-new, #view-genedit { font-size: 15px; }
+  /* 분석 그래프는 넓게 */
+  #chWrap > div, #anPick { min-width: 0 !important; }
+  .tabbar .tab { font-size: 12px; }
+}
+@media (min-width: 1000px) {
+  #app { max-width: 1120px; }
+  #view-collect > #cSide { flex: 0 1 440px; }
+}
+/* 가로 모드 태블릿에서 지도·입력이 나란히 보이도록 */
+@media (min-width: 720px) and (orientation: landscape) {
+  #view-collect > #cMain { flex: 1 1 480px; }
+}

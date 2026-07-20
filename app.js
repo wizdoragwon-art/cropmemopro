@@ -884,7 +884,7 @@
         stat(hc.comb, '조합') + stat(hc.line, '계통') + stat(hc.sel, '선발') + statP() +
       '</div>' +
       '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span><button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button></div>' +
-        projects().map(function (p) {
+        '<div class="projgrid">' + projects().map(function (p) {
           var cur = p.id === curProjKey();
           return '<div style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px">' +
             '<div style="display:flex;align-items:center;gap:9px">' +
@@ -898,7 +898,7 @@
               return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
             }).join('') + '</div>' +
           '</div>';
-        }).join('') +
+        }).join('') + '</div>' +
       '</div>' +
       '<div style="height:20px"></div>';
     renderSyncStat($('syncStat'));
@@ -921,7 +921,7 @@
     var v = $('view-collect');
     v.innerHTML =
       // compact header
-      '<div style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px 9px;border-bottom:0.5px solid var(--border)">' +
+      '<div id="cHead" style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px 9px;border-bottom:0.5px solid var(--border)">' +
         '<button class="btn" id="cBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button>' +
         '<div style="flex:1;min-width:0"><div style="font-size:16px;font-weight:600">야장 수집</div>' +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.crop) + ' ' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
@@ -931,7 +931,8 @@
         '</div>' +
       '</div>' +
       '<div id="cGenBar" style="padding:8px 12px 0"></div>' +
-      '<div id="cMapWrap" class="hidden" style="margin:10px 14px 0"></div>' +
+      '<div id="cSide"><div id="cMapWrap" class="hidden" style="margin:10px 14px 0"></div></div>' +
+      '<div id="cMain">' +
       // card
       '<div id="cCard" style="margin:12px 14px 0"></div>' +
       // survey date
@@ -946,18 +947,20 @@
         '<button class="btn" id="qDraw" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('brush', 'var(--text-primary)', 18) + ' 그리기</button>' +
         '<button class="btn" id="qVoice" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('microphone', 'var(--text-primary)', 18) + ' 음성</button>' +
       '</div>' +
+      '</div>' +
       // line nav
-      '<div style="padding:10px 14px 18px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
+      '<div id="cNav" style="padding:10px 14px 18px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
         '<div style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--text-muted);margin-bottom:8px">' + ico('chevron-left', 'var(--text-muted)', 15) + ' 좌우: 개체 · 상하: 라벨번호 · <span id="cNum">개체</span> ' + ico('chevron-right', 'var(--text-muted)', 15) + '</div>' +
         '<div style="display:flex;gap:10px">' +
           '<button class="btn" id="cPrev" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">' + ico('chevron-left', 'var(--text-primary)', 16) + ' 이전 라벨번호</button>' +
           '<button class="btn" id="cNext" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">다음 라벨번호 ' + ico('chevron-right', 'var(--text-primary)', 16) + '</button>' +
         '</div>' +
       '</div>';
+    v.className = 'view on' + (S.showMap ? ' mapOn' : '');
     renderCard(); renderDate(); renderPills(); renderInput(); renderHist(); renderMap(); renderGenBar();
     $('cNum').textContent = '개체 ' + S.indiv + '/' + total();
     $('cBack').onclick = function () { go('home'); };
-    $('cMap').onclick = function () { S.showMap = !S.showMap; $('cMapWrap').classList.toggle('hidden', !S.showMap); };
+    $('cMap').onclick = function () { S.showMap = !S.showMap; renderCollect(); };
     $('cPrev').onclick = function () { moveLine(-1); };
     $('cNext').onclick = function () { moveLine(1); };
     $('qPhoto').onclick = function () { openPhotos(); };
@@ -2816,6 +2819,7 @@
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
       if (!S.settings.deviceId) S.settings.deviceId = 'dev-' + Math.random().toString(36).slice(2, 8);
       S.indivSel = await kvGet('indivSel') || {};
+      if (window.innerWidth >= 900) S.showMap = true;
       S.lastSync = await kvGet('lastSync') || null;
       if (S.genIdx >= S.gens.length) S.genIdx = 0;
       var g = curGen();
