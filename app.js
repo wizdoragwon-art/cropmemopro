@@ -215,13 +215,14 @@
   }
   async function syncDrive(url, g, silent) {
     var auth = { deviceId: S.settings.deviceId, token: S.settings.token || '' };
-    var built = await buildCSV(g);
+    var proj = projectOf(projKeyOf(g));
+    var built = await buildCSV(proj);
     if (built) {
       await postSync(url, Object.assign({ action: 'driveCsv', proj: g.projName, fileName: built.name, csv: built.csv }, auth));
     }
     // upload images that haven't been sent yet
     var sentMap = await kvGet('imgSynced') || {};
-    var files = await collectGenImages(g);
+    var files = await collectProjImages(proj);
     var pending = files.filter(function (f) { return !sentMap[f.name]; });
     for (var i = 0; i < pending.length; i++) {
       var f = pending[i];
@@ -280,13 +281,22 @@
     if (t.type === 'text') return '사용자 기입';
     return t.unit || '';
   }
-  async function buildCSV(g) {
-    var all = await obsAll(), recs = all.filter(function (r) { return r.genId === g.id; });
+  function traitOfGen(g, id) { var ts = (g && g.traits) || []; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
+  // 과제(프로젝트) 전체 = 모든 세대를 한 파일로
+  async function buildCSV(p) {
+    if (p && p.lines != null && p.items) { /* project */ } else if (p && p.traits) { p = projectOf(projKeyOf(p)); }
+    if (!p) return null;
+    var all = await obsAll();
+    var genOf = {}, lineById = {}, lineOrder = {}, seq = 0;
+    p.items.forEach(function (it) {
+      genOf[it.g.id] = it.g;
+      it.g.lines.forEach(function (l) { lineById[it.g.id + '|' + l.id] = l; lineOrder[it.g.id + '|' + l.id] = seq++; });
+    });
+    var recs = all.filter(function (r) { return !!genOf[r.genId]; });
     if (!recs.length) return null;
-    var lineById = {}, lineOrder = {};
-    g.lines.forEach(function (l, i) { lineById[l.id] = l; lineOrder[l.id] = i; });
+    function ord(r) { var k = lineOrder[r.genId + '|' + r.lineId]; return k == null ? 9e9 : k; }
     recs.sort(function (a, b) {
-      var la = lineOrder[a.lineId] == null ? 9e9 : lineOrder[a.lineId], lb = lineOrder[b.lineId] == null ? 9e9 : lineOrder[b.lineId];
+      var la = ord(a), lb = ord(b);
       if (la !== lb) return la - lb;
       if (a.indiv !== b.indiv) return a.indiv - b.indiv;
       if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
@@ -294,21 +304,21 @@
     });
     var rows = [['No.', '라벨번호', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '개체 선발', '조합, 계통 선발']];
     recs.forEach(function (r, i) {
-      var l = lineById[r.lineId] || {}, t = traitById(r.traitId);
+      var g = genOf[r.genId], l = lineById[r.genId + '|' + r.lineId] || {}, t = traitOfGen(g, r.traitId);
       var val = (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value;
       rows.push([i + 1, l.label || r.lineId, l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
     });
     var csv = rows.map(function (row) { return row.map(function (c) { c = (c == null ? '' : String(c)); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
     var used = [];
-    recs.forEach(function (r) { var l = lineById[r.lineId]; if (l && used.indexOf(l.label) < 0) used.push(l.label); });
+    recs.forEach(function (r) { var l = lineById[r.genId + '|' + r.lineId]; if (l && used.indexOf(l.label) < 0) used.push(l.label); });
     var first = used[0] || '', last = used[used.length - 1] || '';
-    return { name: safeName(g.projName) + '_' + safeName(first) + '-' + safeName(last) + '_' + ymd() + '.csv', csv: csv, rows: recs.length };
+    return { name: safeName(p.name) + '_' + safeName(first) + '-' + safeName(last) + '_' + ymd() + '.csv', csv: csv, rows: recs.length, gens: p.items.length };
   }
   async function exportCSV() {
-    var g = curGen(), built = await buildCSV(g);
+    var built = await buildCSV(projectOf(curProjKey()));
     if (!built) { toast('내보낼 데이터가 없습니다'); return; }
     downloadBlob(new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), built.name);
-    toast('CSV ' + built.rows + '행 내보냄');
+    toast('CSV ' + built.rows + '행 · 세대 ' + built.gens + '개 내보냄');
   }
 
   // ---------- routing ----------
@@ -909,8 +919,8 @@
     $('cNum').textContent = '개체 ' + S.indiv + '/' + total();
     $('cBack').onclick = function () { go('home'); };
     $('cMap').onclick = function () { S.showMap = !S.showMap; $('cMapWrap').classList.toggle('hidden', !S.showMap); };
-    $('cPrev').onclick = function () { S.lineIdx = Math.max(0, S.lineIdx - 1); S.indiv = 1; renderCollect(); };
-    $('cNext').onclick = function () { S.lineIdx = Math.min(g.lines.length - 1, S.lineIdx + 1); S.indiv = 1; renderCollect(); };
+    $('cPrev').onclick = function () { moveLine(-1); };
+    $('cNext').onclick = function () { moveLine(1); };
     $('qPhoto').onclick = function () { openPhotos(); };
     $('qDraw').onclick = function () { openDraw(); };
     $('qVoice').onclick = function () { S.voice = { transcript: '', parsed: [], listening: false }; go('voice'); };
@@ -973,10 +983,30 @@
       else if (cbV && Math.abs(dy) > 55 && Math.abs(dy) > Math.abs(dx) * 1.3) { haptic(15); cbV(dy < 0 ? 1 : -1); }
     });
   }
+  function projSeq() {
+    var p = projectOf(curProjKey()), seq = [];
+    (p ? p.items : []).forEach(function (it) { it.g.lines.forEach(function (l, li) { seq.push({ gi: it.idx, li: li }); }); });
+    return seq;
+  }
   function moveLine(d) {
-    var g = curGen(), nv = Math.max(0, Math.min(g.lines.length - 1, S.lineIdx + d));
-    if (nv === S.lineIdx) return;
-    S.lineIdx = nv; S.indiv = 1; renderCollect();
+    var seq = projSeq(), pos = -1;
+    for (var i = 0; i < seq.length; i++) { if (seq[i].gi === S.genIdx && seq[i].li === S.lineIdx) { pos = i; break; } }
+    if (pos < 0) { // 안전장치: 세대 내에서만 이동
+      var g0 = curGen(), nv0 = Math.max(0, Math.min(g0.lines.length - 1, S.lineIdx + d));
+      if (nv0 === S.lineIdx) return; S.lineIdx = nv0; S.indiv = 1; renderCollect(); return;
+    }
+    var np = pos + d;
+    if (np < 0 || np >= seq.length) { toast(np < 0 ? '과제의 첫 라벨번호입니다' : '과제의 마지막 라벨번호입니다'); return; }
+    var t = seq[np];
+    if (t.gi === S.genIdx) { S.lineIdx = t.li; S.indiv = 1; renderCollect(); return; }
+    var keepName = (traitById(S.trait) || {}).name;
+    S.genIdx = t.gi; S.lineIdx = t.li; S.indiv = 1;
+    var g2 = curGen();
+    S.date = (g2.surveyDates && g2.surveyDates[g2.surveyDates.length - 1]) || todayStr();
+    var same = null;
+    (g2.traits || []).forEach(function (tt) { if (!same && tt.name === keepName) same = tt; });
+    S.trait = (same || g2.traits[0] || {}).id || null;
+    loadVals().then(function () { renderCollect(); toast(g2.label + ' 세대로 이어서 조사'); });
   }
 
   function renderCard() {
@@ -1246,15 +1276,18 @@
     var types = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
     var rows = g.traits.map(function (t, i) {
       var opts = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
-      return '<div class="tE-card" data-i="' + i + '" style="background:var(--surface-1);border-radius:12px;padding:11px 12px;margin-bottom:8px"><div style="display:flex;gap:8px;align-items:center">' +
-        '<button class="btn tE-grip" data-i="' + i + '" style="width:34px;height:38px;flex:0 0 auto;padding:0;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab">' + ico('grip-vertical', 'var(--text-muted)', 17) + '</button>' +
-        '<input class="ein tE-name" data-i="' + i + '" style="flex:1;height:40px" value="' + esc(t.name) + '"><button class="btn tE-del" data-i="' + i + '" style="width:40px;height:40px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
+      return '<div class="tE-card" data-i="' + i + '" style="background:var(--surface-1);border-radius:12px;padding:11px 12px;margin-bottom:8px"><div style="display:flex;gap:6px;align-items:center">' +
+        '<button class="btn tE-grip" data-i="' + i + '" style="width:32px;height:38px;flex:0 0 auto;padding:0;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab">' + ico('grip-vertical', 'var(--text-muted)', 17) + '</button>' +
+        '<input class="ein tE-name" data-i="' + i + '" style="flex:1;min-width:0;height:40px" value="' + esc(t.name) + '">' +
+        '<button class="btn tE-up" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === 0 ? ';opacity:.35' : '') + '">▲</button>' +
+        '<button class="btn tE-down" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === g.traits.length - 1 ? ';opacity:.35' : '') + '">▼</button>' +
+        '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
     }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
       '<div style="flex:1;padding:14px 14px;overflow:auto" id="tEScroll"><div id="tEList">' + rows + '</div>' +
         '<button class="btn" id="tEAdd" style="width:100%;height:46px;font-size:14px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 18) + ' 형질 추가</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 카드를 <b>꾹 눌러</b> 위아래로 옮기면 형질 순서가 바뀝니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있고, 이름·종류를 바꿔도 기존 입력값은 유지됩니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러 끌어도 됩니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있고, 이름·종류를 바꿔도 기존 입력값은 유지됩니다.</div>' +
       '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="tEDone" style="width:100%;height:48px;font-size:15px">완료</button></div>';
     function done() { syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null; kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); }); }
@@ -1270,45 +1303,57 @@
     v.querySelectorAll('.tE-optdel').forEach(function (b) { b.onclick = function () { syncTE(); var t = g.traits[+b.getAttribute('data-i')], oi = +b.getAttribute('data-oi'); t.options.splice(oi, 1); if (!t.options.length) t.options = ['항목1']; renderTraitEditor(); }; });
     v.querySelectorAll('.tE-optadd').forEach(function (b) { b.onclick = function () { syncTE(); var t = g.traits[+b.getAttribute('data-i')]; t.options = t.options || []; t.options.push('항목' + (t.options.length + 1)); renderTraitEditor(); }; });
     $('tEAdd').onclick = function () { syncTE(); var nt = { id: 't' + Date.now(), name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); g.traits.push(nt); renderTraitEditor(); };
+    v.querySelectorAll('.tE-up').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (i <= 0) return; syncTE(); moveTrait(g, i, i - 1); }; });
+    v.querySelectorAll('.tE-down').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (i >= g.traits.length - 1) return; syncTE(); moveTrait(g, i, i + 1); }; });
     setupTraitReorder(g);
   }
+  function moveTrait(g, from, to) {
+    if (to < 0 || to >= g.traits.length || from === to) return;
+    var t = g.traits.splice(from, 1)[0];
+    g.traits.splice(to, 0, t);
+    kvSet('gens', S.gens).then(function () { renderTraitEditor(); haptic(14); });
+  }
   function setupTraitReorder(g) {
-    var list = $('tEList'), scroller = $('tEScroll'); if (!list) return;
+    var list = $('tEList'); if (!list) return;
     var drag = null, lp = null;
     function cards() { return Array.prototype.slice.call(list.querySelectorAll('.tE-card')); }
     function startDrag(card, y) {
       if (drag) return;
       syncTE();
       drag = { card: card, y0: y, dy: 0 };
-      card.style.transition = 'none'; card.style.opacity = '0.92'; card.style.boxShadow = '0 8px 20px rgba(0,0,0,.18)';
-      card.style.position = 'relative'; card.style.zIndex = '5';
+      card.style.transition = 'none'; card.style.opacity = '0.94'; card.style.boxShadow = '0 10px 24px rgba(0,0,0,.22)';
+      card.style.position = 'relative'; card.style.zIndex = '5'; card.style.pointerEvents = 'none';
       haptic(18);
     }
-    function moveDrag(y) {
+    // 손가락 아래에 있는 카드를 기준으로 자리를 바꾸고, 끌던 카드는 손가락에 붙어 있게 유지
+    function moveDrag(x, y) {
       if (!drag) return;
       drag.dy = y - drag.y0;
       drag.card.style.transform = 'translateY(' + drag.dy + 'px)';
-      var dr = drag.card.getBoundingClientRect(), mid = dr.top + dr.height / 2;
-      var all = cards(), di = all.indexOf(drag.card), target = di;
-      for (var i = 0; i < all.length; i++) {
-        if (all[i] === drag.card) continue;
-        var r = all[i].getBoundingClientRect(), m = r.top + r.height / 2;
-        if (i < di && mid < m) target = Math.min(target, i);
-        if (i > di && mid > m) target = Math.max(target, i);
-      }
-      if (target === di) return;
-      if (target > di) list.insertBefore(drag.card, all[target].nextSibling);
-      else list.insertBefore(drag.card, all[target]);
-      drag.y0 = y; drag.dy = 0; drag.card.style.transform = 'translateY(0px)';
+      var el = document.elementFromPoint(x == null ? 40 : x, y);
+      var over = el && el.closest ? el.closest('.tE-card') : null;
+      if (!over || over === drag.card || over.parentNode !== list) return;
+      if (Date.now() - (drag.lastSwap || 0) < 220) return;
+      var r = over.getBoundingClientRect();
+      var below = !!(drag.card.compareDocumentPosition(over) & 4); // 아래쪽 카드인가
+      var enter = below ? (y > r.top + r.height * 0.35) : (y < r.bottom - r.height * 0.35);
+      if (!enter) return;
+      var beforeTop = drag.card.getBoundingClientRect().top;
+      list.insertBefore(drag.card, below ? over.nextSibling : over);
+      drag.card.style.transform = 'translateY(0px)';
+      var newTop = drag.card.getBoundingClientRect().top;
+      drag.dy = beforeTop - newTop;
+      drag.y0 = y - drag.dy;
+      drag.card.style.transform = 'translateY(' + drag.dy + 'px)';
+      drag.lastSwap = Date.now();
       haptic(10);
     }
     function endDrag() {
       if (!drag) return;
       var card = drag.card; drag = null;
-      card.style.transform = ''; card.style.opacity = ''; card.style.boxShadow = ''; card.style.zIndex = ''; card.style.position = '';
+      card.style.transform = ''; card.style.opacity = ''; card.style.boxShadow = ''; card.style.zIndex = ''; card.style.position = ''; card.style.pointerEvents = '';
       var order = cards().map(function (c) { return +c.getAttribute('data-i'); });
-      var same = order.every(function (v, i) { return v === i; });
-      if (same) return;
+      if (order.every(function (v, i) { return v === i; })) return;
       g.traits = order.map(function (idx) { return g.traits[idx]; });
       kvSet('gens', S.gens).then(function () { renderTraitEditor(); toast('형질 순서 변경됨'); });
     }
@@ -1317,27 +1362,20 @@
       h.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) { e.preventDefault(); startDrag(h.closest('.tE-card'), t.clientY); } }, { passive: false });
     });
     list.querySelectorAll('.tE-card').forEach(function (card) {
-      card.addEventListener('pointerdown', function (e) {
-        if (e.target.closest && e.target.closest('input,select,button,.sw')) return;
-        var y = e.clientY;
-        lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420);
-      });
-      card.addEventListener('touchstart', function (e) {
-        if (e.target.closest && e.target.closest('input,select,button,.sw')) return;
-        var t = e.touches[0]; if (!t) return; var y = t.clientY;
-        lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420);
-      }, { passive: true });
+      function press(y) { lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420); }
+      card.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('input,select,button,.sw')) return; press(e.clientY); });
+      card.addEventListener('touchstart', function (e) { if (e.target.closest && e.target.closest('input,select,button,.sw')) return; var t = e.touches[0]; if (t) press(t.clientY); }, { passive: true });
     });
     function cancelLp() { if (lp) { clearTimeout(lp); lp = null; } }
-    // 문서 리스너는 한 번만 등록하고, 현재 활성 편집기에 위임
     S._reorder = { move: moveDrag, end: endDrag, cancel: cancelLp, active: function () { return !!drag; } };
     if (!S._reorderBound) {
       S._reorderBound = true;
       var R = function () { return S._reorder || null; };
-      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientY); } else r.cancel(); }, { passive: false });
-      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientY); } } else r.cancel(); }, { passive: false });
+      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientX, e.clientY); } else r.cancel(); }, { passive: false });
+      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientX, t.clientY); } } else r.cancel(); }, { passive: false });
       document.addEventListener('pointerup', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
       document.addEventListener('touchend', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
+      document.addEventListener('pointercancel', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
     }
   }
 
@@ -2529,10 +2567,10 @@
     v.innerHTML =
       '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
       '<div style="padding:16px 16px">' +
-        '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 내보냅니다.<br>열: No. · 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>단위</b> · <b>개체 선발</b> · <b>조합, 계통 선발</b><br>파일명: 과제명_처음라벨-마지막라벨_일자.csv</div>' +
+        '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 <b>과제의 모든 세대</b>를 한 파일에 내보냅니다.<br>열: No. · 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>단위</b> · <b>개체 선발</b> · <b>조합, 계통 선발</b><br>파일명: 과제명_처음라벨-마지막라벨_일자.csv</div>' +
         '<button class="btn primary" id="eCsv" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px">' + ico('file-export', '#fff', 20) + ' CSV 내보내기 (다운로드)</button>' +
         '<button class="btn" id="ePhotos" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('download', 'var(--text-primary)', 20) + ' 사진 다운로드 (jpg 개별저장)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6"><b>과제의 모든 세대</b> 사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +
         '<button class="btn" id="eZip" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('photo', 'var(--text-primary)', 20) + ' 사진 ZIP 내보내기</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>CropMemo / ' + esc(g.projName) + ' /</b> 폴더 구조의 ZIP 하나로 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다. 저장 후 드라이브·메일로 공유하세요.</div>' +
         '<button class="btn" id="eSync" style="width:100%;height:48px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:10px">' + ico('cloud-upload', 'var(--text-primary)', 18) + ' 지금 동기화 (CSV, 사진 전송)</button>' +
@@ -2545,32 +2583,44 @@
   }
 
   function exportPhotoZip() {
-    var g = curGen();
+    var proj = projectOf(curProjKey());
+    if (!proj) { toast('과제를 찾을 수 없습니다'); return; }
     toast('사진 모으는 중…');
-    photosForGen(g.id).then(function (ps) {
-      var root = 'CropMemo/' + safeName(g.projName) + '/';
-      var files = [], used = {};
-      function push(name, bytes) { var n = name, c = 2; while (used[n]) { n = name.replace(/\.jpg$/, '') + '(' + (c++) + ').jpg'; } used[n] = 1; files.push({ name: root + n, data: bytes }); }
-      ps.forEach(function (p) { try { push(photoFileName(g, p), dataURLtoBytes(p.anno || p.orig)); } catch (e) {} });
-      // handwriting stored as text-trait values
-      obsAll().then(function (all) {
-        var lineById = {}; g.lines.forEach(function (l) { lineById[l.id] = l; });
-        all.forEach(function (r) {
-          if (r.genId !== g.id || typeof r.value !== 'string' || r.value.indexOf('data:image') !== 0) return;
-          var t = traitById(r.traitId), l = lineById[r.lineId] || {};
-          var nm = safeName(g.projName) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + ymd(r.updatedAt) + '.jpg';
-          try { push(nm, dataURLtoBytes(r.value)); } catch (e) {}
-        });
-        if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
-        try {
-          var zip = makeZip(files);
-          downloadBlob(new Blob([zip], { type: 'application/zip' }), 'CropMemo_' + safeName(g.projName) + '_' + ymd() + '.zip');
-          toast(files.length + '개 파일 ZIP 저장됨');
-        } catch (e) { toast('ZIP 생성 실패 · 사진이 너무 많을 수 있습니다'); }
-      });
+    collectProjImages(proj).then(function (imgs) {
+      if (!imgs.length) { toast('내보낼 사진·그림이 없습니다'); return; }
+      var root = 'CropMemo/' + safeName(proj.name) + '/';
+      var files = [];
+      imgs.forEach(function (im) { try { files.push({ name: root + im.name, data: dataURLtoBytes(im.url) }); } catch (e) {} });
+      if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
+      try {
+        var zip = makeZip(files);
+        downloadBlob(new Blob([zip], { type: 'application/zip' }), 'CropMemo_' + safeName(proj.name) + '_' + ymd() + '.zip');
+        toast(files.length + '개 파일 ZIP 저장됨 · 세대 ' + proj.items.length + '개');
+      } catch (e) { toast('ZIP 생성 실패 · 사진이 너무 많을 수 있습니다'); }
     });
   }
 
+  function collectProjImages(p) {
+    p = p || projectOf(curProjKey());
+    var items = (p && p.items) || [];
+    var out = [], used = {};
+    function push(name, dataUrl) { var n = name, c = 2; while (used[n]) { n = name.replace(/\.jpg$/, '') + '(' + (c++) + ').jpg'; } used[n] = 1; out.push({ name: n, url: dataUrl }); }
+    var seq = Promise.resolve();
+    items.forEach(function (it) {
+      seq = seq.then(function () { return photosForGen(it.g.id); }).then(function (ps) { ps.forEach(function (ph) { push(photoFileName(it.g, ph), ph.anno || ph.orig); }); });
+    });
+    return seq.then(function () { return obsAll(); }).then(function (all) {
+      items.forEach(function (it) {
+        var lineById = {}; it.g.lines.forEach(function (l) { lineById[l.id] = l; });
+        all.forEach(function (r) {
+          if (r.genId !== it.g.id || typeof r.value !== 'string' || r.value.indexOf('data:image') !== 0) return;
+          var t = traitOfGen(it.g, r.traitId), l = lineById[r.lineId] || {};
+          push(safeName(it.g.projName) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + ymd(r.updatedAt) + '.jpg', r.value);
+        });
+      });
+      return out;
+    });
+  }
   function collectGenImages(g) {
     return photosForGen(g.id).then(function (ps) {
       var out = [], used = {};
@@ -2588,9 +2638,8 @@
     });
   }
   function exportPhotoFiles() {
-    var g = curGen();
     toast('사진 모으는 중…');
-    collectGenImages(g).then(function (files) {
+    collectProjImages().then(function (files) {
       if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
       if (files.length > 5 && !confirm(files.length + '개 파일을 다운로드 폴더에 저장할까요?\n(브라우저가 여러 파일 저장 허용을 물어볼 수 있습니다)')) return;
       toast(files.length + '개 저장 중…');
