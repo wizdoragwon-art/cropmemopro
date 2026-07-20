@@ -351,7 +351,7 @@
   function wizCropMeta(name) { var cs = S.wiz.crops; for (var i = 0; i < cs.length; i++) if (cs[i].name === name) return cs[i]; return null; }
   function wizTraitSet(name) { return (TRAITSETS[name] || GENERIC_TRAITS); }
   function yy() { return String(new Date().getFullYear()).slice(-2); }
-  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: yy(), prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '' }; go('new'); }
+  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: yy(), prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '', extraTraits: [] }; go('new'); }
 
   function renderNew() {
     var w = S.wiz; if (!w) { startNew(); return; }
@@ -396,7 +396,7 @@
       bodyHtml = '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">세대 <span style="color:var(--text-muted);font-weight:400">(중복 선택)</span></div>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px">' + gc + '</div>' +
         '<div style="display:flex;gap:10px;margin-top:14px"><div style="flex:1"><label style="font-size:12px;color:var(--text-secondary)">조합·계통 수</label><input class="ein" id="wLines" type="number" style="margin-top:6px" value="' + w.lines + '"></div><div style="flex:1"><label style="font-size:12px;color:var(--text-secondary)">계통당 개체 수</label><input class="ein" id="wIndiv" type="number" style="margin-top:6px" value="' + w.indiv + '"></div></div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">라벨은 <b>' + esc(w.prefix || yy()) + '-0001</b> 형식으로 자동 생성됩니다. 나중에 수정·일괄등록할 수 있어요.</div>';
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">라벨은 <b>' + esc(w.prefix || yy()) + '-0001</b> 형식으로 자동 생성됩니다.' + (w.rcbd ? ' 반복 배치가 켜져 있어 <b>같은 라벨번호가 반복 ' + w.reps + '개</b>(1~' + w.reps + ')로 각각 만들어집니다.' : '') + '</div>';
     } else {
       if (w.rows && w.rows.length) {
         var prev = w.rows.slice(0, 8);
@@ -420,7 +420,7 @@
     }
     return tabs + bodyHtml +
       '<label style="font-size:12px;color:var(--text-secondary);display:block;margin:16px 0 6px">포장 / 구역</label><input class="ein" id="wZone" value="' + esc(w.zone) + '">' +
-      '<div class="card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:500">반복 배치 (RCBD)</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">분산분석·유전력 산출에 필요</div></div><div class="sw' + (w.rcbd ? ' on' : '') + '" id="wRcbd"><div class="knob"></div></div></div>' + reps + '</div>';
+      '<div class="card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:500">반복 배치 (RCBD)</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">같은 라벨번호를 반복 수만큼 배치 · 분산분석·유전력에 필요</div></div><div class="sw' + (w.rcbd ? ' on' : '') + '" id="wRcbd"><div class="knob"></div></div></div>' + reps + '</div>';
   }
   function wizFileGens(w) { var out = []; (w.rows || []).forEach(function (r) { if (r.gen && out.indexOf(r.gen) < 0) out.push(r.gen); }); return out; }
   function wizGenList(w) { if (w.src === 'file') { var fg = wizFileGens(w); if (fg.length) return fg; } return w.gens.slice().sort(byGen); }
@@ -431,21 +431,36 @@
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : ''));
       return '<div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:0.5px solid var(--border)"><div style="flex:1;font-size:13px;font-weight:500;color:' + (on ? 'var(--text-primary)' : 'var(--text-muted)') + '">' + esc(t.name) + (tag ? ' <span style="font-size:10px;color:var(--text-muted);border:0.5px solid var(--border);border-radius:5px;padding:1px 5px">' + esc(tag) + '</span>' : '') + '</div><div class="sw wtoggle' + (on ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div>';
     }).join('');
+    var types = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
+    var extras = (w.extraTraits || []).map(function (t, i) {
+      var opts2 = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
+      return '<div class="card" style="margin-bottom:8px;border:0.5px solid #CFE0BA;background:#F7FAF2">' +
+        '<div style="display:flex;gap:8px;align-items:center"><input class="ein wT-name" data-i="' + i + '" style="flex:1;height:38px" placeholder="형질명" value="' + esc(t.name) + '"><button class="btn wT-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 15) + '</button></div>' +
+        '<div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein wT-type" data-i="' + i + '" style="flex:1;height:38px">' + opts2 + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw wT-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' +
+        teConfig(t, i, 'wT') + '</div>';
+    }).join('');
     return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + wizGenList(w).join('·') + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
-      '<div>' + rows + '</div>';
+      '<div>' + rows + '</div>' +
+      (extras ? '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">추가한 형질</div>' + extras : '') +
+      '<button class="btn" id="wTAdd" style="width:100%;height:44px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 17) + ' 형질 추가</button>';
   }
   function wizSummary(w) {
     var set = wizTraitSet(w.crop);
-    var active = set.filter(function (t, i) { return !w.traitOff[i]; }).length;
+    var active = set.filter(function (t, i) { return !w.traitOff[i]; }).length + ((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }).length);
     var gls = wizGenList(w), nG = gls.length, byFile = wizFileGens(w).length > 0;
     var labels, indivs;
+    var reps = w.rcbd ? Math.max(1, w.reps) : 1;
     if (w.src === 'file' && w.rows && w.rows.length) {
+      var noRep = w.rows.filter(function (r) { return !r.rep; }).length, withRep = w.rows.length - noRep;
+      var plotsPerGen = noRep * reps + withRep;
       labels = byFile ? w.rows.length : w.rows.length * nG;
-      indivs = w.rows.reduce(function (a, r) { return a + (r.indiv || w.indiv); }, 0) * (byFile ? 1 : nG);
-    } else { labels = w.lines * nG; indivs = w.lines * w.indiv * nG; }
+      indivs = w.rows.reduce(function (a, r) { return a + (r.indiv || w.indiv) * (r.rep ? 1 : reps); }, 0) * (byFile ? 1 : nG);
+      w._plots = plotsPerGen * (byFile ? 1 : nG);
+    } else { labels = w.lines * nG; indivs = w.lines * w.indiv * nG * reps; w._plots = w.lines * reps * nG; }
     return '<div style="display:flex;gap:8px;margin-bottom:8px">' +
       '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + labels + '</div><div style="font-size:11px;color:#3B6D11">총 라벨번호</div></div>' +
       '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + indivs + '</div><div style="font-size:11px;color:#3B6D11">총 개체수</div></div>' +
+      (w.rcbd ? '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + (w._plots || 0) + '</div><div style="font-size:11px;color:#3B6D11">시험구(반복 포함)</div></div>' : '') +
       '<div style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700">' + active + '</div><div style="font-size:11px;color:var(--text-muted)">형질</div></div></div>';
   }
   function wizBlock(w) {
@@ -500,24 +515,52 @@
         readLabelFile(f, function (rows, note) { w.rows = rows; w.fileName = f.name; w.fromOCR = (note === 'ocr'); renderNew(); });
       };
     } else {
-      document.querySelectorAll('.wtoggle').forEach(function (b) { b.onclick = function () { var bd = $('wBody'); S._wizScroll = bd ? bd.scrollTop : 0; var i = +b.getAttribute('data-i'); if (w.traitOff[i]) delete w.traitOff[i]; else w.traitOff[i] = 1; renderNew(); }; });
+      function keepScroll() { var bd = $('wBody'); S._wizScroll = bd ? bd.scrollTop : 0; }
+      function syncWT() {
+        document.querySelectorAll('.wT-name').forEach(function (inp) { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value; });
+        document.querySelectorAll('.wT-unit').forEach(function (inp) { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.unit = inp.value.trim(); });
+        document.querySelectorAll('.wT-scale').forEach(function (inp) { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.scale = parseScale(inp.value); });
+        (w.extraTraits || []).forEach(function (t, i) { if (t.type === 'categorical') { var arr = []; document.querySelectorAll('.wT-opt[data-i="' + i + '"]').forEach(function (inp) { var v2 = inp.value.trim(); if (v2) arr.push(v2); }); t.options = arr.length ? arr : ['항목1']; } });
+      }
+      document.querySelectorAll('.wtoggle').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); var i = +b.getAttribute('data-i'); if (w.traitOff[i]) delete w.traitOff[i]; else w.traitOff[i] = 1; renderNew(); }; });
+      $('wTAdd').onclick = function () { keepScroll(); syncWT(); w.extraTraits = w.extraTraits || []; var nt = { name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); w.extraTraits.push(nt); renderNew(); };
+      document.querySelectorAll('.wT-name').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value; }; });
+      document.querySelectorAll('.wT-type').forEach(function (sel) { sel.onchange = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = [1, 3, 5, 7, 9]; if (t.type === 'ratio' && !t.unit) t.unit = '%'; if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; if (t.type === 'numeric' && t.unit === '%') t.unit = ''; t.series = inferSeries(t); renderNew(); }; });
+      document.querySelectorAll('.wT-series').forEach(function (sw) { sw.onclick = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sw.getAttribute('data-i')]; t.series = !t.series; renderNew(); }; });
+      document.querySelectorAll('.wT-del').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits.splice(+b.getAttribute('data-i'), 1); renderNew(); }; });
+      document.querySelectorAll('.wT-uchip').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits[+b.getAttribute('data-i')].unit = b.getAttribute('data-u'); renderNew(); }; });
+      document.querySelectorAll('.wT-unit').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.unit = inp.value.trim(); }; });
+      document.querySelectorAll('.wT-scale').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.scale = parseScale(inp.value); }; });
+      document.querySelectorAll('.wT-opt').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')], oi = +inp.getAttribute('data-oi'); if (t && t.options) t.options[oi] = inp.value; }; });
+      document.querySelectorAll('.wT-optdel').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); var t = w.extraTraits[+b.getAttribute('data-i')]; t.options.splice(+b.getAttribute('data-oi'), 1); if (!t.options.length) t.options = ['항목1']; renderNew(); }; });
+      document.querySelectorAll('.wT-optadd').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); var t = w.extraTraits[+b.getAttribute('data-i')]; t.options = t.options || []; t.options.push('항목' + (t.options.length + 1)); renderNew(); }; });
     }
   }
   function createProject() {
     var w = S.wiz, meta = wizCropMeta(w.crop);
-    var defs = wizTraitSet(w.crop).filter(function (t, i) { return !w.traitOff[i]; });
+    var defs = wizTraitSet(w.crop).filter(function (t, i) { return !w.traitOff[i]; }).concat((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }));
     var base = Date.now(), newGens = [], gls = wizGenList(w), byFileGen = wizFileGens(w).length > 0;
     gls.forEach(function (gl, gi) {
       var traits = defs.map(function (t, ti) { var o = { id: 't' + (ti + 1), name: t.name, type: t.type }; if (t.unit) o.unit = t.unit; if (t.scale) o.scale = t.scale.slice(); if (t.options) o.options = t.options.slice(); o.series = inferSeries(o); return o; });
-      var lines = [];
+      var lines = [], reps = w.rcbd ? Math.max(1, w.reps) : 1;
       if (w.src === 'file' && w.rows && w.rows.length) {
         var src = byFileGen ? w.rows.filter(function (r) { return r.gen === gl; }) : w.rows;
         src.forEach(function (r, i) {
-          var rep = r.rep || (w.rcbd ? ((i % w.reps) + 1) : 1);
-          lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: r.label, rep: rep, block: w.rcbd ? ('B-' + rep) : '', zone: w.zone, row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
+          if (r.rep) { // 파일에 반복이 지정된 행은 그대로
+            lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: r.label, rep: r.rep, block: w.rcbd ? ('B-' + r.rep) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
+          } else { // 반복이 없으면 같은 라벨을 반복 수만큼 생성
+            for (var rp = 1; rp <= reps; rp++) {
+              lines.push({ id: 'L' + String(i + 1).padStart(3, '0') + '_R' + rp, label: r.label, rep: rp, block: w.rcbd ? ('B-' + rp) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
+            }
+          }
         });
       } else {
-        for (var i = 0; i < w.lines; i++) { var n = String(i + 1).padStart(4, '0'); lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: w.prefix + '-' + n, rep: w.rcbd ? ((i % w.reps) + 1) : 1, block: w.rcbd ? ('B-' + ((i % w.reps) + 1)) : '', zone: w.zone, row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: w.indiv, selected: false }); }
+        for (var i = 0; i < w.lines; i++) {
+          var n = String(i + 1).padStart(4, '0'), lab = w.prefix + '-' + n;
+          for (var rp2 = 1; rp2 <= reps; rp2++) {
+            lines.push({ id: 'L' + String(i + 1).padStart(3, '0') + '_R' + rp2, label: lab, rep: rp2, block: w.rcbd ? ('B-' + rp2) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: w.indiv, selected: false });
+          }
+        }
       }
       if (!lines.length) return;
       newGens.push({ id: 'G' + base + '_' + gi, projId: 'P' + base, projName: w.name, crop: w.crop, color: (meta && meta.color) || '#639922', label: gl, prefix: w.prefix, surveyDates: [todayStr()], traits: traits, lines: lines });
@@ -594,7 +637,7 @@
       '<div class="ovl-title">세대 추가</div>' +
       '<div class="ovl-msg">이 과제에 추가할 세대를 고르세요. 형질세트와 포장 정보는 <b>' + esc(src.label) + '</b>에서 복사됩니다.</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">' + avail.map(function (x) { return '<button class="pill agchip" data-g="' + x + '">' + x + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(x) + '</span></button>'; }).join('') + '</div>' +
-      '<div style="display:flex;gap:10px;align-items:center;margin-top:14px"><span style="font-size:12px;color:var(--text-secondary)">계통 수</span><input class="ein" id="agN" type="number" value="' + src.lines.length + '" style="height:40px;width:96px;text-align:center"></div>' +
+      '<div style="display:flex;gap:10px;align-items:center;margin-top:14px"><span style="font-size:12px;color:var(--text-secondary)">라벨번호 수</span><input class="ein" id="agN" type="number" value="' + (function () { var u = {}; src.lines.forEach(function (l) { u[l.label] = 1; }); return Object.keys(u).length; })() + '" style="height:40px;width:96px;text-align:center"></div>' +
       '<div class="ovl-btns"><button class="btn" id="agCancel">취소</button><button class="btn primary" id="agOk">추가</button></div>'
     );
     var pick = null;
@@ -602,11 +645,15 @@
     $('agCancel').onclick = closeOverlay;
     $('agOk').onclick = function () {
       if (!pick) { toast('세대를 선택하세요'); return; }
-      var n = parseInt($('agN').value) || src.lines.length;
+      var n = parseInt($('agN').value) || 0;
+      var repsSet = {}; src.lines.forEach(function (l) { repsSet[l.rep || 1] = 1; });
+      var reps = Math.max(1, Object.keys(repsSet).length);
       var base = Date.now(), lines = [];
       for (var k = 0; k < n; k++) {
-        var num = String(k + 1).padStart(4, '0');
-        lines.push({ id: 'L' + String(k + 1).padStart(3, '0'), label: (src.prefix || yy()) + '-' + num, rep: (src.lines[k] && src.lines[k].rep) || ((k % 3) + 1), block: 'B-' + (((src.lines[k] && src.lines[k].rep) || ((k % 3) + 1))), zone: (src.lines[0] && src.lines[0].zone) || 'A동', row: Math.floor(k / 10) + 1, col: (k % 10) + 1, indivTotal: (src.lines[0] ? src.lines[0].indivTotal : 10), selected: false });
+        var num = String(k + 1).padStart(4, '0'), lab = (src.prefix || yy()) + '-' + num;
+        for (var rp = 1; rp <= reps; rp++) {
+          lines.push({ id: 'L' + String(k + 1).padStart(3, '0') + '_R' + rp, label: lab, rep: rp, block: 'B-' + rp, zone: (src.lines[0] && src.lines[0].zone) || 'A동', row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: (src.lines[0] ? src.lines[0].indivTotal : 10), selected: false });
+        }
       }
       var ng = { id: 'G' + base, projId: projKeyOf(src), projName: src.projName, crop: src.crop, color: src.color, label: pick, prefix: src.prefix, surveyDates: [todayStr()], traits: JSON.parse(JSON.stringify(src.traits)), lines: lines };
       S.gens.splice(fromIdx + 1, 0, ng);
@@ -1130,18 +1177,19 @@
   }
 
   function parseScale(s) { var parts = String(s).split(/[\s,·]+/).filter(function (x) { return x !== ''; }); if (!parts.length) return [1, 3, 5, 7, 9]; var allNum = parts.every(function (x) { return /^-?\d+(\.\d+)?$/.test(x); }); return allNum ? parts.map(Number) : parts; }
-  function teConfig(t, i) {
+  function teConfig(t, i, px) {
+    px = px || 'tE';
     if (t.type === 'numeric') {
       var units = ['mm', 'cm', 'm', 'g', 'kg', 'mg', 'SHU', 'Brix', '°', '점'];
-      var chips = units.map(function (u) { return '<button class="btn tE-uchip" data-i="' + i + '" data-u="' + u + '" style="padding:4px 9px;font-size:12px;border-radius:14px' + (t.unit === u ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + u + '</button>'; }).join('');
-      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">측정 단위</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div><input class="ein tE-unit" data-i="' + i + '" placeholder="직접 입력 (예: mmol/L)" style="height:36px;margin-top:6px;font-size:13px" value="' + esc(t.unit || '') + '"></div>';
+      var chips = units.map(function (u) { return '<button class="btn ' + px + '-uchip" data-i="' + i + '" data-u="' + u + '" style="padding:4px 9px;font-size:12px;border-radius:14px' + (t.unit === u ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + u + '</button>'; }).join('');
+      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">측정 단위</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div><input class="ein ' + px + '-unit" data-i="' + i + '" placeholder="직접 입력 (예: mmol/L)" style="height:36px;margin-top:6px;font-size:13px" value="' + esc(t.unit || '') + '"></div>';
     }
     if (t.type === 'rating') {
-      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein tE-scale" data-i="' + i + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || [1, 3, 5, 7, 9]).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다.</div></div>';
+      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || [1, 3, 5, 7, 9]).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다.</div></div>';
     }
     if (t.type === 'categorical') {
-      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein tE-opt" data-i="' + i + '" data-oi="' + oi + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn tE-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
-      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">항목 · 추가·이름 변경</div>' + items + '<button class="btn tE-optadd" data-i="' + i + '" style="width:100%;height:38px;font-size:13px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 항목 추가</button></div>';
+      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
+      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">항목 · 추가·이름 변경</div>' + items + '<button class="btn ' + px + '-optadd" data-i="' + i + '" style="width:100%;height:38px;font-size:13px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 항목 추가</button></div>';
     }
     if (t.type === 'text') {
       return '<div style="margin-top:9px;font-size:12px;color:#3B6D11;background:#EAF3DE;border-radius:8px;padding:8px 10px">' + ico('pencil', '#3B6D11', 13) + ' 사용자가 쓰거나 그릴 수 있습니다.</div>';
