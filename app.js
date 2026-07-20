@@ -1208,13 +1208,15 @@
     var types = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
     var rows = g.traits.map(function (t, i) {
       var opts = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
-      return '<div class="card" style="margin-bottom:8px"><div style="display:flex;gap:8px;align-items:center"><input class="ein tE-name" data-i="' + i + '" style="flex:1;height:40px" value="' + esc(t.name) + '"><button class="btn tE-del" data-i="' + i + '" style="width:40px;height:40px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
+      return '<div class="tE-card" data-i="' + i + '" style="background:var(--surface-1);border-radius:12px;padding:11px 12px;margin-bottom:8px;touch-action:pan-y"><div style="display:flex;gap:8px;align-items:center">' +
+        '<button class="btn tE-grip" data-i="' + i + '" style="width:34px;height:38px;flex:0 0 auto;padding:0;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab">' + ico('grip-vertical', 'var(--text-muted)', 17) + '</button>' +
+        '<input class="ein tE-name" data-i="' + i + '" style="flex:1;height:40px" value="' + esc(t.name) + '"><button class="btn tE-del" data-i="' + i + '" style="width:40px;height:40px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
     }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
-      '<div style="flex:1;padding:14px 14px;overflow:auto">' + rows +
+      '<div style="flex:1;padding:14px 14px;overflow:auto" id="tEScroll"><div id="tEList">' + rows + '</div>' +
         '<button class="btn" id="tEAdd" style="width:100%;height:46px;font-size:14px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 18) + ' 형질 추가</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">종류마다 아래 칸에서 단위·척도·항목을 직접 설정할 수 있습니다. 이름·종류 변경 시 기존 입력값은 유지됩니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 카드를 <b>꾹 눌러</b> 위아래로 옮기면 형질 순서가 바뀝니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있고, 이름·종류를 바꿔도 기존 입력값은 유지됩니다.</div>' +
       '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="tEDone" style="width:100%;height:48px;font-size:15px">완료</button></div>';
     function done() { syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null; kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); }); }
@@ -1230,6 +1232,68 @@
     v.querySelectorAll('.tE-optdel').forEach(function (b) { b.onclick = function () { syncTE(); var t = g.traits[+b.getAttribute('data-i')], oi = +b.getAttribute('data-oi'); t.options.splice(oi, 1); if (!t.options.length) t.options = ['항목1']; renderTraitEditor(); }; });
     v.querySelectorAll('.tE-optadd').forEach(function (b) { b.onclick = function () { syncTE(); var t = g.traits[+b.getAttribute('data-i')]; t.options = t.options || []; t.options.push('항목' + (t.options.length + 1)); renderTraitEditor(); }; });
     $('tEAdd').onclick = function () { syncTE(); var nt = { id: 't' + Date.now(), name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); g.traits.push(nt); renderTraitEditor(); };
+    setupTraitReorder(g);
+  }
+  function setupTraitReorder(g) {
+    var list = $('tEList'), scroller = $('tEScroll'); if (!list) return;
+    var drag = null, lp = null;
+    function cards() { return Array.prototype.slice.call(list.querySelectorAll('.tE-card')); }
+    function startDrag(card, y) {
+      syncTE();
+      drag = { card: card, y0: y, dy: 0 };
+      card.style.transition = 'none'; card.style.opacity = '0.92'; card.style.boxShadow = '0 8px 20px rgba(0,0,0,.18)';
+      card.style.position = 'relative'; card.style.zIndex = '5';
+      haptic(18);
+    }
+    function moveDrag(y) {
+      if (!drag) return;
+      drag.dy = y - drag.y0;
+      drag.card.style.transform = 'translateY(' + drag.dy + 'px)';
+      var mid = drag.card.getBoundingClientRect().top + drag.card.offsetHeight / 2;
+      var others = cards().filter(function (c) { return c !== drag.card; });
+      for (var i = 0; i < others.length; i++) {
+        var r = others[i].getBoundingClientRect();
+        if (mid > r.top && mid < r.bottom) {
+          var goingDown = mid > r.top + r.height / 2;
+          if (goingDown) list.insertBefore(drag.card, others[i].nextSibling);
+          else list.insertBefore(drag.card, others[i]);
+          drag.y0 = y; drag.dy = 0; drag.card.style.transform = 'translateY(0px)';
+          haptic(10);
+          break;
+        }
+      }
+    }
+    function endDrag() {
+      if (!drag) return;
+      var card = drag.card; drag = null;
+      card.style.transform = ''; card.style.opacity = ''; card.style.boxShadow = ''; card.style.zIndex = ''; card.style.position = '';
+      var order = cards().map(function (c) { return +c.getAttribute('data-i'); });
+      var same = order.every(function (v, i) { return v === i; });
+      if (same) return;
+      g.traits = order.map(function (idx) { return g.traits[idx]; });
+      kvSet('gens', S.gens).then(function () { renderTraitEditor(); toast('형질 순서 변경됨'); });
+    }
+    list.querySelectorAll('.tE-grip').forEach(function (h) {
+      h.addEventListener('pointerdown', function (e) { e.preventDefault(); startDrag(h.closest('.tE-card'), e.clientY); });
+      h.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) { e.preventDefault(); startDrag(h.closest('.tE-card'), t.clientY); } }, { passive: false });
+    });
+    list.querySelectorAll('.tE-card').forEach(function (card) {
+      card.addEventListener('pointerdown', function (e) {
+        if (e.target.closest && e.target.closest('input,select,button,.sw')) return;
+        var y = e.clientY;
+        lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420);
+      });
+      card.addEventListener('touchstart', function (e) {
+        if (e.target.closest && e.target.closest('input,select,button,.sw')) return;
+        var t = e.touches[0]; if (!t) return; var y = t.clientY;
+        lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420);
+      }, { passive: true });
+    });
+    function cancelLp() { if (lp) { clearTimeout(lp); lp = null; } }
+    document.addEventListener('pointermove', function (e) { if (drag) { e.preventDefault(); moveDrag(e.clientY); } else cancelLp(); }, { passive: false });
+    document.addEventListener('touchmove', function (e) { if (drag) { var t = e.touches[0]; if (t) { e.preventDefault(); moveDrag(t.clientY); } } else cancelLp(); }, { passive: false });
+    document.addEventListener('pointerup', function () { cancelLp(); endDrag(); });
+    document.addEventListener('touchend', function () { cancelLp(); endDrag(); });
   }
 
   // ---------- FIELD MAP ----------
@@ -2192,8 +2256,10 @@
     if (o.stage === 'idle') {
       bodyInner =
         '<div class="card" style="text-align:center;padding:26px 16px"><div style="width:64px;height:64px;border-radius:16px;background:#EAF3DE;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">' + ico('camera', '#639922', 32) + '</div><div style="font-size:14px;font-weight:500">라벨을 촬영하세요</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.6">인쇄된 영문·숫자 라벨(예: ' + esc(g.prefix || 'CU') + '24-001) 인식에 최적화되어 있습니다. 밝고 반듯하게, 라벨이 화면을 꽉 채우도록 찍으면 정확합니다.</div></div>' +
-        '<button class="btn primary" id="oShot" style="width:100%;height:52px;font-size:15px;margin-top:14px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 촬영 / 사진 선택</button>' +
+        '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" id="oShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 카메라 촬영</button>' +
+        '<button class="btn" id="oPick" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('photo', 'var(--text-primary)', 20) + ' 앨범에서 선택</button></div>' +
         '<input type="file" id="oFile" accept="image/*" capture="environment" style="display:none">' +
+        '<input type="file" id="oPickFile" accept="image/*" style="display:none">' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">손글씨 라벨은 인식률이 낮을 수 있어 결과를 확인·수정한 뒤 적용하세요. 첫 사용 시 엔진을 내려받으므로 온라인에서 한 번 실행해두면 이후 오프라인에서도 됩니다.</div>';
     } else if (o.stage === 'running') {
       bodyInner =
@@ -2211,14 +2277,16 @@
     $('oBack').onclick = function () { go('collect'); };
     if (o.stage === 'idle') {
       $('oShot').onclick = function () { $('oFile').click(); };
-      $('oFile').onchange = function () {
-        var f = this.files && this.files[0]; if (!f) return;
+      $('oPick').onclick = function () { $('oPickFile').click(); };
+      $('oPickFile').onchange = function () { var f = this.files && this.files[0]; this.value = ''; if (f) startOCRWith(f); };
+      $('oFile').onchange = function () { var f = this.files && this.files[0]; this.value = ''; if (f) startOCRWith(f); };
+      function startOCRWith(f) {
         try { o.img = URL.createObjectURL(f); } catch (e) { o.img = null; }
         o.stage = 'running'; o.prog = 0; o.status = '엔진 불러오는 중…'; renderOCR();
         runOCR(f, function (m) { if (m && m.status) { o.status = m.status + (m.progress != null ? ' ' + Math.round(m.progress * 100) + '%' : ''); if (m.status.indexOf('recognizing') >= 0) o.prog = m.progress || 0; if ($('view-ocr').classList.contains('on') && S.ocr === o && o.stage === 'running') renderOCR(); } })
           .then(function (r) { if (S.ocr !== o) return; o.text = r.text || ''; o.conf = r.conf || 0; o.stage = 'done'; renderOCR(); })
           .catch(function () { if (S.ocr !== o) return; o.stage = 'done'; o.text = ''; o.conf = 0; renderOCR(); toast('인식 엔진을 불러오지 못했습니다. 라벨을 직접 입력하세요.'); });
-      };
+      }
     } else if (o.stage === 'done') {
       $('oText').oninput = function () { o.text = this.value; };
       $('oRetry').onclick = function () { o.stage = 'idle'; o.text = ''; o.conf = 0; renderOCR(); };
@@ -2248,13 +2316,17 @@
       '<div style="flex:1;padding:14px 14px;overflow:auto">' + grid + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">사진을 탭하면 그리기(주석)로 편집됩니다. ' + ico('download', 'var(--text-muted)', 12) + ' 로 한 장씩, 아래 버튼으로 선택한 여러 장을 기기에 저장합니다.<br>파일명: 과제명_라벨번호_개체번호_형질_촬영일자.jpg</div></div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
         (selN ? '<button class="btn" id="phSaveSel" style="width:100%;height:46px;font-size:14px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' 선택한 ' + selN + '장 기기에 저장</button>' : '') +
-        '<button class="btn primary" id="phShot" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 촬영 / 사진 추가</button><input type="file" id="phFile" accept="image/*" multiple style="display:none"></div>';
+        '<div style="display:flex;gap:8px"><button class="btn primary" id="phShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 카메라 촬영</button>' +
+        '<button class="btn" id="phPick" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('photo', 'var(--text-primary)', 20) + ' 앨범에서 선택</button></div>' +
+        '<input type="file" id="phCam" accept="image/*" capture="environment" style="display:none">' +
+        '<input type="file" id="phFile" accept="image/*" multiple style="display:none"></div>';
     $('phBack').onclick = function () { go('collect'); };
-    $('phShot').onclick = function () { $('phFile').click(); };
+    $('phShot').onclick = function () { $('phCam').click(); };
+    $('phPick').onclick = function () { $('phFile').click(); };
     if ($('phAll')) $('phAll').onclick = function () { var all = selN === ps.length; ps.forEach(function (p) { sel[p.id] = !all; }); renderPhoto(); };
     if ($('phSaveSel')) $('phSaveSel').onclick = function () { var picked = ps.filter(function (p) { return sel[p.id]; }); if (!picked.length) return; toast(picked.length + '장 저장 중…'); picked.forEach(function (p, i) { setTimeout(function () { savePhotoFile(p); }, i * 400); }); };
-    $('phFile').onchange = function () {
-      var fl = this.files; if (!fl || !fl.length) return;
+    function addPhotos(fl) {
+      if (!fl || !fl.length) return;
       var t = traitById(S.trait), tn = t ? t.name : '사진';
       toast(fl.length + '장 저장 중…');
       var seq = Promise.resolve();
@@ -2262,7 +2334,9 @@
         seq = seq.then(function () { return fileToScaledDataURL(f, 1400); }).then(function (url) { return photoPut({ id: 'ph' + Date.now() + '_' + i, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: t ? t.id : null, traitName: tn, orig: url, anno: null, createdAt: Date.now() }); });
       });
       seq.then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; renderPhoto(); toast(fl.length + '장 저장됨'); }).catch(function () { toast('사진 처리 실패'); });
-    };
+    }
+    $('phFile').onchange = function () { var fl = this.files; this.value = ''; addPhotos(fl); };
+    $('phCam').onchange = function () { var fl = this.files; this.value = ''; if (!fl || !fl.length) { toast('촬영이 취소되었습니다'); return; } addPhotos(fl); };
     v.querySelectorAll('.pThumb').forEach(function (im) { im.onclick = function () { S.drawId = im.getAttribute('data-id'); go('draw'); }; });
     v.querySelectorAll('.pSel').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); sel[id] = !sel[id]; renderPhoto(); }; });
     v.querySelectorAll('.pSave').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); var p = ps.filter(function (x) { return x.id === id; })[0]; if (p) { savePhotoFile(p); toast('저장됨'); } }; });
