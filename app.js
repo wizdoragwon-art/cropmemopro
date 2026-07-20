@@ -164,14 +164,22 @@
     });
     return order.map(function (k) {
       var p = map[k];
-      p.items.sort(function (a, b) { var ia = GEN_ORDER.indexOf(a.g.label), ib = GEN_ORDER.indexOf(b.g.label); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+      p.items.sort(function (a, b) { return byGen(a.g.label, b.g.label); });
       p.lines = p.items.reduce(function (n, it) { return n + it.g.lines.length; }, 0);
       return p;
     });
   }
+  function projCounts(p) {
+    var comb = 0, line = 0, sel = 0;
+    (p ? p.items : []).forEach(function (it) {
+      var isComb = genRole(it.g.label) === '조합';
+      it.g.lines.forEach(function (l) { if (isComb) comb++; else line++; if (l.selected) sel++; });
+    });
+    return { comb: comb, line: line, sel: sel };
+  }
   function projectOf(key) { var all = projects(); for (var i = 0; i < all.length; i++) if (all[i].id === key) return all[i]; return null; }
   function curProjKey() { return projKeyOf(curGen()); }
-  function genRole(label) { return label === 'F1' ? '조합' : '계통'; }
+  function genRole(label) { return label === 'F1' ? '조합' : (label === 'F#' ? '범용' : '계통'); }
   function curLine() { return curGen().lines[S.lineIdx]; }
   function traitById(id) { var ts = curGen().traits; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   function total() { return curLine().indivTotal; }
@@ -337,7 +345,7 @@
     { name: '무', color: '#7BA0C4', prefix: 'RD' }, { name: '배추', color: '#7FB069', prefix: 'CB' },
     { name: '수박', color: '#2E7D5B', prefix: 'WM' }, { name: '오이', color: '#4E9A51', prefix: 'CU' }
   ];
-  var GEN_ORDER = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9'];
+  var GEN_ORDER = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F#'];
   var TRAITSETS = {
     '토마토': [{ name: '과장', type: 'numeric', unit: 'mm' }, { name: '과중', type: 'numeric', unit: 'g' }, { name: '당도', type: 'numeric', unit: 'Bx' }, { name: '병징', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '발병면적률', type: 'ratio', unit: '%' }, { name: 'TSWV 저항성', type: 'rating', scale: ['R', 'IR', 'S'] }, { name: '착과수', type: 'counter' }, { name: '과형', type: 'categorical', options: ['원형', '편원형', '장형'] }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }],
     '고추': [{ name: '과장', type: 'numeric', unit: 'mm' }, { name: '과폭', type: 'numeric', unit: 'mm' }, { name: '과중', type: 'numeric', unit: 'g' }, { name: '신미', type: 'categorical', options: ['약', '중', '강'] }, { name: '역병 저항성', type: 'rating', scale: ['R', 'IR', 'S'] }, { name: '탄저병', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '착과수', type: 'counter' }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }],
@@ -347,7 +355,25 @@
     '오이': [{ name: '과장', type: 'numeric', unit: 'mm' }, { name: '과경', type: 'numeric', unit: 'mm' }, { name: '과중', type: 'numeric', unit: 'g' }, { name: '노균병', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '발병면적률', type: 'ratio', unit: '%' }, { name: '흰가루병 저항성', type: 'rating', scale: ['R', 'IR', 'S'] }, { name: '마디수', type: 'counter' }, { name: '과형', type: 'categorical', options: ['직과형', '곡과형', '단과형'] }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }]
   };
   var GENERIC_TRAITS = [{ name: '생육 상태', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '초장', type: 'numeric', unit: 'cm' }, { name: '병해', type: 'rating', scale: [1, 3, 5, 7, 9] }, { name: '수확일', type: 'date' }, { name: '비고', type: 'text' }];
-  function byGen(a, b) { return GEN_ORDER.indexOf(a) - GEN_ORDER.indexOf(b); }
+  function genRank(l) { var v = String(l || '').trim(); if (v === 'F#') return 999; var m = /^F(\d+)$/i.exec(v); return m ? parseInt(m[1], 10) : 1000; }
+  function byGen(a, b) { var ra = genRank(a), rb = genRank(b); if (ra !== rb) return ra - rb; return String(a) < String(b) ? -1 : (String(a) > String(b) ? 1 : 0); }
+  function wizGenChoices(w) { var out = GEN_ORDER.slice(); (w.customGens || []).forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); }); (w.gens || []).forEach(function (x) { if (out.indexOf(x) < 0) out.push(x); }); return out.sort(byGen); }
+  function askGenLabel(cb) {
+    openOverlay(
+      '<div class="ovl-title">세대 직접 입력</div>' +
+      '<div class="ovl-msg">목록에 없는 세대를 입력하세요. 예: <b>F10</b>, <b>F12</b>, <b>BC1F2</b>, <b>고정계통</b><br>세대를 모를 때는 목록의 <b>F#</b>을 쓰면 됩니다.</div>' +
+      '<input class="ein" id="gcInput" style="margin-top:12px;text-align:center;font-size:16px;font-weight:600" placeholder="예: F10">' +
+      '<div class="ovl-btns"><button class="btn" id="gcCancel">취소</button><button class="btn primary" id="gcOk">추가</button></div>'
+    );
+    var inp = $('gcInput'); try { inp.focus(); } catch (e) {}
+    $('gcCancel').onclick = closeOverlay;
+    $('gcOk').onclick = function () {
+      var v = (inp.value || '').trim().toUpperCase();
+      if (!v) { toast('세대를 입력하세요'); return; }
+      if (v.length > 12) { toast('너무 깁니다'); return; }
+      closeOverlay(); cb(v);
+    };
+  }
   function wizCropMeta(name) { var cs = S.wiz.crops; for (var i = 0; i < cs.length; i++) if (cs[i].name === name) return cs[i]; return null; }
   function wizTraitSet(name) { return (TRAITSETS[name] || GENERIC_TRAITS); }
   function yy() { return String(new Date().getFullYear()).slice(-2); }
@@ -392,8 +418,9 @@
       '<button class="btn wsrc" data-s="file" style="flex:1;height:46px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px' + (w.src === 'file' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + ico('table', w.src === 'file' ? '#3B6D11' : 'var(--text-secondary)', 16) + ' 엑셀·CSV 등록</button></div>';
     var bodyHtml;
     if (w.src === 'auto') {
-      var gc = GEN_ORDER.map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + g + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + g + '</button>'; }).join('');
-      bodyHtml = '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">세대 <span style="color:var(--text-muted);font-weight:400">(중복 선택)</span></div>' +
+      var gc = wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') +
+        '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button>';
+      bodyHtml = '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">세대 <span style="color:var(--text-muted);font-weight:400">(중복 선택 · <b>F#</b>은 세대를 모를 때 쓰는 범용 표기)</span></div>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px">' + gc + '</div>' +
         '<div style="display:flex;gap:10px;margin-top:14px"><div style="flex:1"><label style="font-size:12px;color:var(--text-secondary)">조합·계통 수</label><input class="ein" id="wLines" type="number" style="margin-top:6px" value="' + w.lines + '"></div><div style="flex:1"><label style="font-size:12px;color:var(--text-secondary)">계통당 개체 수</label><input class="ein" id="wIndiv" type="number" style="margin-top:6px" value="' + w.indiv + '"></div></div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">라벨은 <b>' + esc(w.prefix || yy()) + '-0001</b> 형식으로 자동 생성됩니다.' + (w.rcbd ? ' 반복 배치가 켜져 있어 <b>같은 라벨번호가 반복 ' + w.reps + '개</b>(1~' + w.reps + ')로 각각 만들어집니다.' : '') + '</div>';
@@ -405,7 +432,7 @@
           '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:6px 9px">#</th><th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:center;padding:6px 9px">세대</th><th style="text-align:center;padding:6px 9px">반복</th><th style="text-align:center;padding:6px 9px">개체</th></tr></thead><tbody>' +
           prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:5px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:5px 9px;text-align:center">' + esc(r.gen || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wFileReset" style="flex:0 0 100px;height:40px;font-size:13px">다시 선택</button><div style="flex:1;display:flex;align-items:center;font-size:11px;color:var(--text-muted)">세대 열이 없으면 아래 세대로 등록됩니다</div></div>' +
-          (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + GEN_ORDER.map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + g + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + g + '</button>'; }).join('') + '</div></div>') +
+          (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') + '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div></div>') +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">개체 수가 없는 행은 <b>' + w.indiv + '</b>개로 등록됩니다. <input class="ein" id="wIndiv" type="number" style="width:70px;height:32px;display:inline-block;vertical-align:middle;margin-left:4px" value="' + w.indiv + '"></div>';
       } else {
         bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
@@ -497,6 +524,7 @@
     } else if (w.step === 2) {
       document.querySelectorAll('.wsrc').forEach(function (b) { b.onclick = function () { w.src = b.getAttribute('data-s'); renderNew(); }; });
       document.querySelectorAll('.wgen').forEach(function (b) { b.onclick = function () { var g = b.getAttribute('data-g'), i = w.gens.indexOf(g); if (i >= 0) w.gens.splice(i, 1); else w.gens.push(g); renderNew(); }; });
+      if ($('wGenAdd')) $('wGenAdd').onclick = function () { askGenLabel(function (v) { w.customGens = w.customGens || []; if (w.customGens.indexOf(v) < 0) w.customGens.push(v); if (w.gens.indexOf(v) < 0) w.gens.push(v); renderNew(); toast(v + ' 추가됨'); }); };
       if ($('wLines')) $('wLines').oninput = function () { w.lines = parseInt(this.value) || 0; };
       if ($('wIndiv')) $('wIndiv').oninput = function () { w.indiv = parseInt(this.value) || 0; };
       $('wZone').oninput = function () { w.zone = this.value; };
@@ -628,20 +656,29 @@
     });
     toast('삭제됨');
   }
-  function addGenPopup(projKey, fromIdx) {
+  function addGenPopup(projKey, fromIdx, preset) {
     var p = projectOf(projKey), src = S.gens[fromIdx];
     var used = p.items.map(function (it) { return it.g.label; });
-    var avail = GEN_ORDER.filter(function (x) { return used.indexOf(x) < 0; });
-    if (!avail.length) { toast('추가할 세대가 없습니다'); return; }
+    var avail = GEN_ORDER.concat(S.customGens || []).filter(function (x, i, arr) { return used.indexOf(x) < 0 && arr.indexOf(x) === i; }).sort(byGen);
     openOverlay(
       '<div class="ovl-title">세대 추가</div>' +
       '<div class="ovl-msg">이 과제에 추가할 세대를 고르세요. 형질세트와 포장 정보는 <b>' + esc(src.label) + '</b>에서 복사됩니다.</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">' + avail.map(function (x) { return '<button class="pill agchip" data-g="' + x + '">' + x + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(x) + '</span></button>'; }).join('') + '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">' + avail.map(function (x) { return '<button class="pill agchip" data-g="' + x + '">' + x + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(x) + '</span></button>'; }).join('') + '<button class="pill" id="agCustom" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div>' +
       '<div style="display:flex;gap:10px;align-items:center;margin-top:14px"><span style="font-size:12px;color:var(--text-secondary)">라벨번호 수</span><input class="ein" id="agN" type="number" value="' + (function () { var u = {}; src.lines.forEach(function (l) { u[l.label] = 1; }); return Object.keys(u).length; })() + '" style="height:40px;width:96px;text-align:center"></div>' +
       '<div class="ovl-btns"><button class="btn" id="agCancel">취소</button><button class="btn primary" id="agOk">추가</button></div>'
     );
-    var pick = null;
-    document.querySelectorAll('.agchip').forEach(function (b) { b.onclick = function () { pick = b.getAttribute('data-g'); document.querySelectorAll('.agchip').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }; });
+    var pick = preset || null;
+    document.querySelectorAll('.agchip').forEach(function (b) {
+      if (pick && b.getAttribute('data-g') === pick) b.classList.add('on');
+      b.onclick = function () { pick = b.getAttribute('data-g'); document.querySelectorAll('.agchip').forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); };
+    });
+    if ($('agCustom')) $('agCustom').onclick = function () {
+      askGenLabel(function (v) {
+        if (used.indexOf(v) >= 0) { toast('이미 있는 세대입니다'); return; }
+        S.customGens = S.customGens || []; if (S.customGens.indexOf(v) < 0) S.customGens.push(v);
+        addGenPopup(projKey, fromIdx, v);
+      });
+    };
     $('agCancel').onclick = closeOverlay;
     $('agOk').onclick = function () {
       if (!pick) { toast('세대를 선택하세요'); return; }
@@ -777,6 +814,7 @@
     var v = $('view-home');
     if (!S.gens.length) { v.innerHTML = homeEmptyHTML(); if ($('heGear')) $('heGear').onclick = function () { go('settings'); }; if ($('heNew')) $('heNew').onclick = function () { startNew(); }; return; }
     var g = curGen(), l = curLine();
+    var hc = projCounts(projectOf(curProjKey()));
     var doneToday = Object.keys(S.vals).length; // rough
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px">' +
@@ -789,12 +827,12 @@
         '<div style="font-size:11px;color:#3B6D11;font-weight:600">이어서 수집</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">' +
           '<div style="width:44px;height:44px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto"><span style="font-size:15px;font-weight:700;color:#27500A">' + esc(g.label) + '</span></div>' +
-          '<div style="flex:1"><div style="font-size:14px;font-weight:600"><span style="color:' + (g.color || '#639922') + '">' + esc(g.crop) + '</span> ' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · ' + g.lines.length + ' 계통</div></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:600"><span style="color:' + (g.color || '#639922') + '">' + esc(g.crop) + '</span> ' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
         '</div>' +
         '<button class="btn primary" id="hResume" style="width:100%;height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px">' + ico('clipboard-list', '#fff', 20) + ' 야장 수집 계속</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin:14px 14px 0">' +
-        stat(g.lines.length, '계통') + stat(g.lines.filter(function (x) { return x.selected; }).length, '선발 계통') + statP() +
+        stat(hc.comb, '조합') + stat(hc.line, '계통') + stat(hc.sel, '선발') + statP() +
       '</div>' +
       '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span><button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button></div>' +
         projects().map(function (p) {
@@ -823,8 +861,8 @@
     document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
     document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; go('genedit'); } }; });
     document.querySelectorAll('.hprojdel').forEach(function (b) { b.onclick = function () { deleteProject(b.getAttribute('data-p')); }; });
-    function stat(n, label) { return '<div style="flex:1;background:var(--surface-1);border-radius:11px;padding:10px 11px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
-    function statP() { return '<div style="flex:1;background:#FAEEDA;border-radius:11px;padding:10px 11px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
+    function stat(n, label) { return '<div style="flex:1;min-width:0;background:var(--surface-1);border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
+    function statP() { return '<div style="flex:1;min-width:0;background:#FAEEDA;border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
   }
 
   // ---------- COLLECT ----------
@@ -1208,7 +1246,7 @@
     var types = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
     var rows = g.traits.map(function (t, i) {
       var opts = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
-      return '<div class="tE-card" data-i="' + i + '" style="background:var(--surface-1);border-radius:12px;padding:11px 12px;margin-bottom:8px;touch-action:pan-y"><div style="display:flex;gap:8px;align-items:center">' +
+      return '<div class="tE-card" data-i="' + i + '" style="background:var(--surface-1);border-radius:12px;padding:11px 12px;margin-bottom:8px"><div style="display:flex;gap:8px;align-items:center">' +
         '<button class="btn tE-grip" data-i="' + i + '" style="width:34px;height:38px;flex:0 0 auto;padding:0;display:flex;align-items:center;justify-content:center;touch-action:none;cursor:grab">' + ico('grip-vertical', 'var(--text-muted)', 17) + '</button>' +
         '<input class="ein tE-name" data-i="' + i + '" style="flex:1;height:40px" value="' + esc(t.name) + '"><button class="btn tE-del" data-i="' + i + '" style="width:40px;height:40px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
     }).join('');
@@ -1239,6 +1277,7 @@
     var drag = null, lp = null;
     function cards() { return Array.prototype.slice.call(list.querySelectorAll('.tE-card')); }
     function startDrag(card, y) {
+      if (drag) return;
       syncTE();
       drag = { card: card, y0: y, dy: 0 };
       card.style.transition = 'none'; card.style.opacity = '0.92'; card.style.boxShadow = '0 8px 20px rgba(0,0,0,.18)';
@@ -1249,19 +1288,19 @@
       if (!drag) return;
       drag.dy = y - drag.y0;
       drag.card.style.transform = 'translateY(' + drag.dy + 'px)';
-      var mid = drag.card.getBoundingClientRect().top + drag.card.offsetHeight / 2;
-      var others = cards().filter(function (c) { return c !== drag.card; });
-      for (var i = 0; i < others.length; i++) {
-        var r = others[i].getBoundingClientRect();
-        if (mid > r.top && mid < r.bottom) {
-          var goingDown = mid > r.top + r.height / 2;
-          if (goingDown) list.insertBefore(drag.card, others[i].nextSibling);
-          else list.insertBefore(drag.card, others[i]);
-          drag.y0 = y; drag.dy = 0; drag.card.style.transform = 'translateY(0px)';
-          haptic(10);
-          break;
-        }
+      var dr = drag.card.getBoundingClientRect(), mid = dr.top + dr.height / 2;
+      var all = cards(), di = all.indexOf(drag.card), target = di;
+      for (var i = 0; i < all.length; i++) {
+        if (all[i] === drag.card) continue;
+        var r = all[i].getBoundingClientRect(), m = r.top + r.height / 2;
+        if (i < di && mid < m) target = Math.min(target, i);
+        if (i > di && mid > m) target = Math.max(target, i);
       }
+      if (target === di) return;
+      if (target > di) list.insertBefore(drag.card, all[target].nextSibling);
+      else list.insertBefore(drag.card, all[target]);
+      drag.y0 = y; drag.dy = 0; drag.card.style.transform = 'translateY(0px)';
+      haptic(10);
     }
     function endDrag() {
       if (!drag) return;
@@ -1290,10 +1329,16 @@
       }, { passive: true });
     });
     function cancelLp() { if (lp) { clearTimeout(lp); lp = null; } }
-    document.addEventListener('pointermove', function (e) { if (drag) { e.preventDefault(); moveDrag(e.clientY); } else cancelLp(); }, { passive: false });
-    document.addEventListener('touchmove', function (e) { if (drag) { var t = e.touches[0]; if (t) { e.preventDefault(); moveDrag(t.clientY); } } else cancelLp(); }, { passive: false });
-    document.addEventListener('pointerup', function () { cancelLp(); endDrag(); });
-    document.addEventListener('touchend', function () { cancelLp(); endDrag(); });
+    // 문서 리스너는 한 번만 등록하고, 현재 활성 편집기에 위임
+    S._reorder = { move: moveDrag, end: endDrag, cancel: cancelLp, active: function () { return !!drag; } };
+    if (!S._reorderBound) {
+      S._reorderBound = true;
+      var R = function () { return S._reorder || null; };
+      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientY); } else r.cancel(); }, { passive: false });
+      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientY); } } else r.cancel(); }, { passive: false });
+      document.addEventListener('pointerup', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
+      document.addEventListener('touchend', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
+    }
   }
 
   // ---------- FIELD MAP ----------
