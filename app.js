@@ -386,8 +386,41 @@
   }
   function wizCropMeta(name) { var cs = S.wiz.crops; for (var i = 0; i < cs.length; i++) if (cs[i].name === name) return cs[i]; return null; }
   function wizTraitSet(name) { return (TRAITSETS[name] || GENERIC_TRAITS); }
+  function wizBase(w) { return (w && w.baseTraits && w.baseTraits.length) ? w.baseTraits : wizTraitSet(w.crop); }
+  function traitSourceList() {
+    var out = [];
+    projects().forEach(function (p) {
+      p.items.forEach(function (it) { if (it.g.traits && it.g.traits.length) out.push({ name: p.name, gen: it.g.label, crop: it.g.crop, traits: it.g.traits }); });
+    });
+    return out;
+  }
+  function loadTraitsPopup(w) {
+    var list = traitSourceList();
+    if (!list.length) { toast('불러올 과제가 없습니다'); return; }
+    openOverlay(
+      '<div class="ovl-title">형질 불러오기</div>' +
+      '<div class="ovl-msg">다른 과제의 형질세트를 순서 그대로 가져옵니다. 현재 기본 형질세트는 대체됩니다.</div>' +
+      '<div style="max-height:230px;overflow:auto;margin-top:12px;border:0.5px solid var(--border);border-radius:10px">' +
+      list.map(function (x, i) {
+        return '<div class="ltRow" data-i="' + i + '" style="display:flex;align-items:center;gap:8px;padding:10px 11px;border-top:' + (i ? '0.5px solid var(--border)' : 'none') + ';cursor:pointer">' +
+          '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(x.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(x.crop) + ' · ' + esc(x.gen) + ' · 형질 ' + x.traits.length + '개</div></div>' +
+          ico('chevron-right', 'var(--text-muted)', 16) + '</div>';
+      }).join('') + '</div>' +
+      '<div class="ovl-btns"><button class="btn" id="ltCancel">취소</button></div>'
+    );
+    $('ltCancel').onclick = closeOverlay;
+    document.querySelectorAll('.ltRow').forEach(function (row) {
+      row.onclick = function () {
+        var x = list[+row.getAttribute('data-i')];
+        w.baseTraits = x.traits.map(function (t) { var o = { name: t.name, type: t.type }; if (t.unit) o.unit = t.unit; if (t.scale) o.scale = t.scale.slice(); if (t.options) o.options = t.options.slice(); o.series = !!t.series; return o; });
+        w.traitOff = {}; w.loadedFrom = x.name + ' · ' + x.gen;
+        closeOverlay(); S._wizScroll = 0; renderNew();
+        toast('형질 ' + w.baseTraits.length + '개 불러옴');
+      };
+    });
+  }
   function yy() { return String(new Date().getFullYear()).slice(-2); }
-  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: yy(), prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '', extraTraits: [] }; go('new'); }
+  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: yy(), prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '', extraTraits: [], baseTraits: null, loadedFrom: null }; go('new'); }
 
   function renderNew() {
     var w = S.wiz; if (!w) { startNew(); return; }
@@ -462,7 +495,7 @@
   function wizFileGens(w) { var out = []; (w.rows || []).forEach(function (r) { if (r.gen && out.indexOf(r.gen) < 0) out.push(r.gen); }); return out; }
   function wizGenList(w) { if (w.src === 'file') { var fg = wizFileGens(w); if (fg.length) return fg; } return w.gens.slice().sort(byGen); }
   function stepTraits(w) {
-    var set = wizTraitSet(w.crop);
+    var set = wizBase(w);
     var rows = set.map(function (t, i) {
       var on = !w.traitOff[i];
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : ''));
@@ -477,12 +510,16 @@
         teConfig(t, i, 'wT') + '</div>';
     }).join('');
     return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + wizGenList(w).join('·') + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
+      (w.loadedFrom ? '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#3B6D11;background:#EAF3DE;border-radius:8px;padding:7px 10px;margin-bottom:8px"><span style="flex:1">' + ico('download', '#3B6D11', 12) + ' 불러온 형질세트 · <b>' + esc(w.loadedFrom) + '</b></span><button class="btn" id="wTReset" style="height:26px;padding:0 8px;font-size:11px">기본으로</button></div>' : '') +
       '<div>' + rows + '</div>' +
       (extras ? '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">추가한 형질</div>' + extras : '') +
-      '<button class="btn" id="wTAdd" style="width:100%;height:44px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 17) + ' 형질 추가</button>';
+      '<div style="display:flex;gap:8px;margin-top:10px">' +
+        '<button class="btn" id="wTAdd" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 16) + ' 형질 추가</button>' +
+        '<button class="btn" id="wTLoad" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 형질 불러오기</button>' +
+      '</div>';
   }
   function wizSummary(w) {
-    var set = wizTraitSet(w.crop);
+    var set = wizBase(w);
     var active = set.filter(function (t, i) { return !w.traitOff[i]; }).length + ((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }).length);
     var gls = wizGenList(w), nG = gls.length, byFile = wizFileGens(w).length > 0;
     var labels, indivs;
@@ -561,6 +598,8 @@
         (w.extraTraits || []).forEach(function (t, i) { if (t.type === 'categorical') { var arr = []; document.querySelectorAll('.wT-opt[data-i="' + i + '"]').forEach(function (inp) { var v2 = inp.value.trim(); if (v2) arr.push(v2); }); t.options = arr.length ? arr : ['항목1']; } });
       }
       document.querySelectorAll('.wtoggle').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); var i = +b.getAttribute('data-i'); if (w.traitOff[i]) delete w.traitOff[i]; else w.traitOff[i] = 1; renderNew(); }; });
+      $('wTLoad').onclick = function () { keepScroll(); syncWT(); loadTraitsPopup(w); };
+      if ($('wTReset')) $('wTReset').onclick = function () { keepScroll(); syncWT(); w.baseTraits = null; w.loadedFrom = null; w.traitOff = {}; renderNew(); toast('기본 형질세트로 되돌림'); };
       $('wTAdd').onclick = function () { keepScroll(); syncWT(); w.extraTraits = w.extraTraits || []; var nt = { name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); w.extraTraits.push(nt); renderNew(); };
       document.querySelectorAll('.wT-name').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value; }; });
       document.querySelectorAll('.wT-type').forEach(function (sel) { sel.onchange = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = [1, 3, 5, 7, 9]; if (t.type === 'ratio' && !t.unit) t.unit = '%'; if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; if (t.type === 'numeric' && t.unit === '%') t.unit = ''; t.series = inferSeries(t); renderNew(); }; });
@@ -576,7 +615,7 @@
   }
   function createProject() {
     var w = S.wiz, meta = wizCropMeta(w.crop);
-    var defs = wizTraitSet(w.crop).filter(function (t, i) { return !w.traitOff[i]; }).concat((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }));
+    var defs = wizBase(w).filter(function (t, i) { return !w.traitOff[i]; }).concat((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }));
     var base = Date.now(), newGens = [], gls = wizGenList(w), byFileGen = wizFileGens(w).length > 0;
     gls.forEach(function (gl, gi) {
       var traits = defs.map(function (t, ti) { var o = { id: 't' + (ti + 1), name: t.name, type: t.type }; if (t.unit) o.unit = t.unit; if (t.scale) o.scale = t.scale.slice(); if (t.options) o.options = t.options.slice(); o.series = inferSeries(o); return o; });
