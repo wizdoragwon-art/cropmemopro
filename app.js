@@ -2747,6 +2747,64 @@
   function onNet() { if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
 
   // ---------- boot ----------
+  // ---------- Android 뒤로가기 ----------
+  function armBack() { try { history.pushState({ cm: 1 }, ''); } catch (e) {} }
+  function handleBack() {
+    if (document.getElementById('ovl')) { closeOverlay(); return true; }          // 팝업 먼저 닫기
+    if (S.view === 'collect' && S.traitEdit) {                                     // 형질세트 편집 → 들어온 곳으로
+      var from = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
+      if (from === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
+      return true;
+    }
+    if (S.view === 'bulk') { if (S.bulkStage === 'parsed') { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); } else { S.editIdx = S.bulkIdx; go('genedit'); } return true; }
+    if (S.view === 'ocr') { if (S.ocr && S.ocr.stage === 'done') { S.ocr.stage = 'idle'; renderOCR(); } else go('collect'); return true; }
+    if (S.view === 'draw' || S.view === 'photo' || S.view === 'voice' || S.view === 'write') { go(S.view === 'draw' ? 'photo' : 'collect'); return true; }
+    if (S.view === 'new') { if (S.wiz && S.wiz.step > 1) { S.wiz.step--; S._wizScroll = 0; renderNew(); } else { S.wiz = null; go('home'); } return true; }
+    if (S.view === 'genedit') { go('home'); return true; }
+    if (S.view === 'collect' || S.view === 'analysis' || S.view === 'export' || S.view === 'settings') { go('home'); return true; }
+    // 홈: 두 번 눌러야 종료
+    if (Date.now() - (S._exitAt || 0) < 2000) return false;
+    S._exitAt = Date.now(); toast('한 번 더 누르면 앱이 닫힙니다');
+    return true;
+  }
+  function setupBackButton() {
+    armBack();
+    window.addEventListener('popstate', function () {
+      var handled = false;
+      try { handled = handleBack(); } catch (e) { handled = false; }
+      if (handled) armBack();   // 다음 뒤로가기도 앱이 받도록 다시 준비
+    });
+  }
+
+  // ---------- 안드로이드 뒤로가기 ----------
+  var BACK_TO = { collect: 'home', analysis: 'home', export: 'home', settings: 'home', 'new': 'home', genedit: 'home',
+                  bulk: 'genedit', ocr: 'collect', photo: 'collect', draw: 'photo', voice: 'collect', write: 'collect' };
+  function pushNav() { try { history.pushState({ cm: 1, v: S.view }, ''); } catch (e) {} }
+  function setupBack() {
+    try { history.replaceState({ cm: 0, v: 'root' }, ''); pushNav(); } catch (e) {}
+    window.addEventListener('popstate', function () {
+      // 1) 팝업이 열려 있으면 팝업만 닫기
+      if (document.getElementById('ovl')) { closeOverlay(); pushNav(); return; }
+      // 2) 형질세트 편집 중이면 편집만 종료
+      if (S.view === 'collect' && S.traitEdit) {
+        var back = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
+        kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () {
+          if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
+        });
+        pushNav(); return;
+      }
+      // 3) 하위 화면이면 상위 화면으로
+      var t = BACK_TO[S.view];
+      if (t) {
+        if (t === 'genedit' && S.bulkIdx != null) S.editIdx = S.bulkIdx;
+        go(t); pushNav(); return;
+      }
+      // 4) 홈에서는 두 번 눌러 종료
+      if (Date.now() - (S._exitAt || 0) < 2000) { try { history.go(-1); } catch (e) {} return; }
+      S._exitAt = Date.now(); toast('뒤로가기를 한 번 더 누르면 종료됩니다'); pushNav();
+    });
+  }
+
   async function boot() {
     try {
       DB = await idb();
@@ -2768,6 +2826,7 @@
       window.addEventListener('online', onNet); window.addEventListener('offline', onNet);
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
       go('home');
+      setupBack();
       if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl) trySync(true);
     } catch (err) { showBootError(err); }
   }
