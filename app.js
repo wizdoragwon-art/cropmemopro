@@ -249,6 +249,85 @@
   }
 
   // ---------- sync (Google Apps Script) ----------
+  // ---------- OneDrive (Microsoft Graph · PKCE) ----------
+  var OD_SCOPE = 'Files.ReadWrite offline_access';
+  function odRedirect() { return location.origin + location.pathname; }
+  function b64url(buf) { var s = btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function randStr(n) { var a = new Uint8Array(n || 32); (crypto.getRandomValues ? crypto : window.msCrypto).getRandomValues(a); return b64url(a.buffer); }
+  async function sha256b64(txt) { var enc = new TextEncoder().encode(txt); var h = await crypto.subtle.digest('SHA-256', enc); return b64url(h); }
+  async function odLogin() {
+    var cid = (S.settings.odClientId || '').trim();
+    if (!cid) { toast('클라이언트 ID를 먼저 입력하세요'); return; }
+    if (!(window.crypto && crypto.subtle)) { toast('보안 연결(https)에서만 로그인할 수 있습니다'); return; }
+    var verifier = randStr(48), challenge = await sha256b64(verifier), state = randStr(12);
+    await kvSet('odPkce', { v: verifier, s: state, cid: cid });
+    var u = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=' + encodeURIComponent(cid) +
+      '&response_type=code&redirect_uri=' + encodeURIComponent(odRedirect()) +
+      '&response_mode=query&scope=' + encodeURIComponent(OD_SCOPE) +
+      '&state=' + encodeURIComponent(state) + '&code_challenge=' + challenge + '&code_challenge_method=S256';
+    location.href = u;
+  }
+  async function odHandleRedirect() {
+    var q = location.search || '';
+    if (q.indexOf('code=') < 0 && q.indexOf('error=') < 0) return false;
+    var pr = new URLSearchParams(q), code = pr.get('code'), st = pr.get('state'), err = pr.get('error_description') || pr.get('error');
+    var pk = await kvGet('odPkce');
+    try { history.replaceState({}, '', odRedirect()); } catch (e) {}
+    if (err) { toast('OneDrive 로그인 실패 · ' + String(err).slice(0, 60)); return true; }
+    if (!code || !pk || pk.s !== st) return true;
+    try {
+      var body = new URLSearchParams({ client_id: pk.cid, grant_type: 'authorization_code', code: code, redirect_uri: odRedirect(), code_verifier: pk.v, scope: OD_SCOPE });
+      var r = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+      var j = await r.json();
+      if (!j.access_token) { toast('토큰 발급 실패 · ' + String(j.error_description || j.error || '').slice(0, 60)); return true; }
+      await kvSet('odTok', { access: j.access_token, refresh: j.refresh_token || '', exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000 });
+      toast('OneDrive 연결됨');
+    } catch (e) { toast('OneDrive 연결 실패 · 네트워크 확인'); }
+    return true;
+  }
+  async function odEnsureToken(silent) {
+    var t = await kvGet('odTok');
+    if (!t) { if (!silent) toast('OneDrive 연결이 필요합니다'); return null; }
+    if (t.access && Date.now() < t.exp) return t.access;
+    if (!t.refresh) { if (!silent) toast('OneDrive 재로그인이 필요합니다'); return null; }
+    try {
+      var body = new URLSearchParams({ client_id: (S.settings.odClientId || '').trim(), grant_type: 'refresh_token', refresh_token: t.refresh, redirect_uri: odRedirect(), scope: OD_SCOPE });
+      var r = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
+      var j = await r.json();
+      if (!j.access_token) { if (!silent) toast('OneDrive 재로그인이 필요합니다'); return null; }
+      await kvSet('odTok', { access: j.access_token, refresh: j.refresh_token || t.refresh, exp: Date.now() + (j.expires_in || 3600) * 1000 - 60000 });
+      return j.access_token;
+    } catch (e) { return null; }
+  }
+  async function odLogout() { await kvSet('odTok', null); toast('OneDrive 연결 해제됨'); renderSettings(); }
+  function odPath(proj, name) { return 'CropMemo/' + safeName(proj) + '/' + safeName(name); }
+  async function odUpload(token, proj, name, data, mime) {
+    var url = 'https://graph.microsoft.com/v1.0/me/drive/root:/' + encodeURI(odPath(proj, name)) + ':/content';
+    var r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': mime || 'application/octet-stream' }, body: data });
+    return r.ok;
+  }
+  async function odWhoAmI(token) {
+    try { var r = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + token } }); var j = await r.json(); return j.userPrincipalName || j.mail || j.displayName || ''; } catch (e) { return ''; }
+  }
+  async function syncOneDrive(proj, silent) {
+    var token = await odEnsureToken(silent);
+    if (!token) return { ok: false };
+    var built = await buildCSV(proj), csvOk = true;
+    if (built) csvOk = await odUpload(token, proj.name, built.name, new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), 'text/csv');
+    var sent = await kvGet('imgSyncedOD') || {};
+    var files = await collectProjImages(proj);
+    var pending = files.filter(function (f) { return !sent[f.name]; }), done = 0;
+    for (var i = 0; i < pending.length; i++) {
+      if (!silent) toast('사진 전송 ' + (i + 1) + '/' + pending.length);
+      try {
+        var bytes = dataURLtoBytes(pending[i].url);
+        var ok = await odUpload(token, proj.name, pending[i].name, new Blob([bytes], { type: 'image/jpeg' }), 'image/jpeg');
+        if (ok) { sent[pending[i].name] = 1; await kvSet('imgSyncedOD', sent); done++; }
+      } catch (e) { break; }
+    }
+    return { ok: csvOk, csv: built ? built.name : null, images: done };
+  }
+
   function postSync(url, payload) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
@@ -274,10 +353,11 @@
     return { csv: built ? built.name : null, images: pending.length };
   }
   async function trySync(silent) {
-    var url = S.settings.syncUrl;
     if (S.settings.syncOn === false) { if (!silent) toast('동기화가 꺼져 있습니다 · 홈에서 켜주세요'); return; }
-    if (!url) { if (!silent) toast('설정에서 동기화 URL을 입력하세요'); return; }
     if (!navigator.onLine) { if (!silent) toast('오프라인 상태입니다'); return; }
+    if ((S.settings.provider || 'gas') === 'od') return trySyncOD(silent);
+    var url = S.settings.syncUrl;
+    if (!url) { if (!silent) toast('설정에서 동기화 URL을 입력하세요'); return; }
     var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
     var g = curGen(), batch = [];
     g.lines.forEach(function (l) {
@@ -303,6 +383,21 @@
     } finally { S.syncing = false; updatePending(); renderCurrent(); }
   }
 
+  async function trySyncOD(silent) {
+    var g = curGen(), proj = projectOf(projKeyOf(g));
+    if (!proj) return;
+    S.syncing = true; renderCurrent();
+    try {
+      var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
+      var res = await syncOneDrive(proj, silent);
+      if (!res.ok) { if (!silent) toast('OneDrive 전송 실패 · 연결 상태를 확인하세요'); return; }
+      for (var i = 0; i < dirty.length; i++) { dirty[i].dirty = 0; await obsPut(dirty[i]); }
+      S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
+      if (!silent) toast('OneDrive 저장 완료' + (res.csv ? ' · CSV' : '') + (res.images ? ' · 사진 ' + res.images + '장' : ''));
+    } catch (e) {
+      if (!silent) toast('OneDrive 전송 실패');
+    } finally { S.syncing = false; updatePending(); renderCurrent(); }
+  }
   async function pingSync() {
     var url = S.settings.syncUrl; if (!url) { toast('URL을 입력하세요'); return; }
     try { var res = await fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'action=ping'); var j = await res.json(); toast(j && j.ok ? '연결 성공 ✓' : '응답 오류'); }
@@ -2859,14 +2954,30 @@
 
   // ---------- SETTINGS ----------
   function renderSettings() {
-    var v = $('view-settings'), st = S.settings;
+    var v = $('view-settings'), st = S.settings, prov = st.provider || 'gas';
     v.innerHTML =
       '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">설정</div></div>' +
       '<div style="padding:16px 16px">' +
-        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">동기화 URL <span style="color:var(--text-muted);font-weight:400">(Apps Script 웹앱 /exec)</span></label>' +
-        '<input class="ein" id="sUrl" style="margin-top:6px" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(st.syncUrl) + '">' +
-        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택 · SYNC_TOKEN과 일치)</span></label>' +
-        '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">' +
+        '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">저장 위치</div>' +
+        '<div style="display:flex;gap:8px;margin-bottom:16px">' +
+          '<button class="btn sProv" data-v="gas" style="flex:1;height:42px;font-size:13px' + (prov === 'gas' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">구글 드라이브</button>' +
+          '<button class="btn sProv" data-v="od" style="flex:1;height:42px;font-size:13px' + (prov === 'od' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">OneDrive</button>' +
+        '</div>' +
+        (prov === 'gas' ?
+          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500">동기화 URL <span style="color:var(--text-muted);font-weight:400">(Apps Script 웹앱 /exec)</span></label>' +
+           '<input class="ein" id="sUrl" style="margin-top:6px" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(st.syncUrl) + '">' +
+           '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택 · SYNC_TOKEN과 일치)</span></label>' +
+           '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">')
+          :
+          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500">OneDrive 클라이언트 ID <span style="color:var(--text-muted);font-weight:400">(Azure 앱 등록 후 발급)</span></label>' +
+           '<input class="ein" id="sOdCid" style="margin-top:6px" placeholder="예) 12ab34cd-56ef-78ab-90cd-1234567890ab" value="' + esc(st.odClientId || '') + '">' +
+           '<div style="display:flex;gap:8px;margin-top:10px">' +
+             '<button class="btn primary" id="sOdLogin" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('cloud-upload', '#fff', 17) + ' OneDrive 연결</button>' +
+             '<button class="btn" id="sOdOut" style="flex:0 0 96px;height:46px;font-size:13px">연결 해제</button>' +
+           '</div>' +
+           '<div id="sOdStat" style="font-size:11px;color:var(--text-muted);margin-top:8px">연결 상태 확인 중…</div>' +
+           '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">리디렉션 주소(Azure에 등록): <b style="word-break:break-all">' + esc(odRedirect()) + '</b></div>')
+        ) +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">기기 ID: ' + esc(st.deviceId) + '</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">동기화 사용</div><div style="font-size:11px;color:var(--text-muted)">끄면 기기에만 저장됩니다 (홈에서도 전환 가능)</div></div><div class="sw' + (st.syncOn !== false ? ' on' : '') + '" id="sSyncOn"><div class="knob"></div></div></div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">진동 피드백</div><div style="font-size:11px;color:var(--text-muted)">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>' +
@@ -2876,7 +2987,8 @@
         '</div>' +
         '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
         '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('cloud-upload', '#639922', 15) + ' 동기화 방법</div>' +
-        '<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
+        (prov === 'gas' ?
+        ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
           '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
           '<b>1.</b> 아래에서 <b>GAS 코드</b>를 내려받습니다.<br>' +
           '<b>2.</b> 브라우저에서 <b>sheets.new</b> 로 새 시트를 만들고 <b>확장 프로그램 → Apps Script</b> 를 엽니다.<br>' +
@@ -2884,17 +2996,39 @@
           '<b>4.</b> <b>배포 → 새 배포 → 웹 앱</b>, 액세스 권한을 <b>모든 사용자</b>로 두고 배포합니다.<br>' +
           '<b>5.</b> 생성된 <b>/exec 주소</b>를 위 <b>동기화 URL</b> 칸에 붙여넣고 저장 → <b>연결 테스트</b>로 확인합니다.' +
         '</div>' +
-        '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">코드를 수정해 배포하면 저장 폴더 이름(CropMemo)도 바꿀 수 있습니다. 동기화를 쓰지 않으려면 홈 화면의 스위치를 꺼두세요.</div>' +
+        '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>')
+        :
+        ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
+          '연결하면 <b>OneDrive</b>의 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 폴더는 자동으로 만들어집니다.<br><br>' +
+          '<b>1.</b> <b>portal.azure.com</b> → <b>Microsoft Entra ID(Azure AD)</b> → <b>앱 등록</b> → <b>새 등록</b>.<br>' +
+          '<b>2.</b> 이름은 자유(예: Crop Memo Pro), 계정 유형은 <b>모든 조직 + 개인 Microsoft 계정</b>을 선택합니다.<br>' +
+          '<b>3.</b> 리디렉션 URI에서 플랫폼을 <b>단일 페이지 애플리케이션(SPA)</b>으로 고르고, 위에 표시된 <b>리디렉션 주소</b>를 그대로 붙여넣습니다.<br>' +
+          '<b>4.</b> 등록 후 <b>API 사용 권한 → Microsoft Graph → 위임된 권한</b>에서 <b>Files.ReadWrite</b>, <b>offline_access</b>를 추가합니다.<br>' +
+          '<b>5.</b> 개요 화면의 <b>애플리케이션(클라이언트) ID</b>를 복사해 위 칸에 붙여넣고 <b>OneDrive 연결</b>을 누릅니다.' +
+          '<br><br><span style="color:#8A5A12">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다. 회사 계정은 관리자 승인이 한 번 필요할 수 있습니다.</span>' +
+        '</div>')) +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">저장 위치는 언제든 위에서 바꿀 수 있습니다. 동기화를 쓰지 않으려면 홈 화면의 스위치를 꺼두세요.</div>' +
         '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
         '<div style="font-size:13px;font-weight:600;margin-bottom:6px">데이터</div>' +
         '<div style="font-size:12px;color:var(--text-secondary)">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + '</div>' +
         '<button class="btn" id="sReset" style="width:100%;height:44px;font-size:13px;margin-top:12px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:18px;line-height:1.7">Crop Memo Pro · 오프라인 우선 PWA<br>현장에서 인터넷 없이 저장되고, 연결되면 Google Sheets로 동기화됩니다.</div>' +
       '</div>';
-    $('sSave').onclick = function () { st.syncUrl = $('sUrl').value.trim(); st.token = $('sTok').value.trim(); kvSet('settings', st).then(function () { toast('저장됨'); if (navigator.onLine && st.syncOn !== false && st.syncUrl) trySync(true); }); };
-    $('sPing').onclick = function () { S.settings.syncUrl = $('sUrl').value.trim(); pingSync(); };
-    $('sGas').onclick = function () {
+    document.querySelectorAll('.sProv').forEach(function (b) { b.onclick = function () { st.provider = b.getAttribute('data-v'); kvSet('settings', st).then(function () { renderSettings(); toast(st.provider === 'od' ? 'OneDrive 저장으로 전환' : '구글 드라이브 저장으로 전환'); }); }; });
+    if ($('sOdCid')) $('sOdCid').oninput = function () { st.odClientId = this.value.trim(); };
+    if ($('sOdLogin')) $('sOdLogin').onclick = function () { st.odClientId = ($('sOdCid').value || '').trim(); kvSet('settings', st).then(function () { odLogin(); }); };
+    if ($('sOdOut')) $('sOdOut').onclick = function () { odLogout(); };
+    if ($('sOdStat')) {
+      odEnsureToken(true).then(function (tk) {
+        var el = $('sOdStat'); if (!el) return;
+        if (!tk) { el.innerHTML = '<span style="color:#B0721A">연결 안 됨 · 클라이언트 ID 입력 후 연결하세요</span>'; return; }
+        el.innerHTML = '<span style="color:#3B6D11">연결됨 ✓</span>';
+        odWhoAmI(tk).then(function (who) { if (who && $('sOdStat')) $('sOdStat').innerHTML = '<span style="color:#3B6D11">연결됨 ✓ ' + esc(who) + '</span>'; });
+      });
+    }
+    $('sSave').onclick = function () { if ($('sUrl')) st.syncUrl = $('sUrl').value.trim(); if ($('sTok')) st.token = $('sTok').value.trim(); if ($('sOdCid')) st.odClientId = $('sOdCid').value.trim(); kvSet('settings', st).then(function () { toast('저장됨'); if (navigator.onLine && st.syncOn !== false && st.syncUrl) trySync(true); }); };
+    $('sPing').onclick = function () { if ((st.provider || 'gas') === 'od') { odEnsureToken().then(function (tk) { if (tk) odWhoAmI(tk).then(function (who) { toast('연결됨 ✓ ' + (who || '')); }); }); return; } S.settings.syncUrl = $('sUrl').value.trim(); pingSync(); };
+    if ($('sGas')) $('sGas').onclick = function () {
       toast('코드 준비 중…');
       fetch('./CropMemoPro_GAS_Code.gs').then(function (r) { if (!r.ok) throw 0; return r.text(); })
         .then(function (txt) { downloadBlob(new Blob([txt], { type: 'text/plain;charset=utf-8' }), 'CropMemoPro_GAS_Code.gs'); toast('GAS 코드 내려받음'); })
@@ -2963,6 +3097,7 @@
   async function boot() {
     try {
       DB = await idb();
+      try { await odHandleRedirect(); } catch (e) {}
       var gens = await kvGet('gens'); if (!gens) { gens = seedGens(); await kvSet('gens', gens); }
       var mig = false;
       gens.forEach(function (g) { if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; } });
