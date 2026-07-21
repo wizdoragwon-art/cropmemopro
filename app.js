@@ -919,8 +919,32 @@
       kvSet('gens', S.gens).then(function () { S.editIdx = fromIdx + 1; renderGenEdit(); toast(pick + ' 세대 추가됨'); });
     };
   }
+  function geCropChips() {
+    var out = WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color }; });
+    var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41'];
+    S.gens.forEach(function (x) { if (x.crop && !out.some(function (o) { return o.name === x.crop; })) out.push({ name: x.crop, color: x.color || pal[out.length % pal.length] }); });
+    if (S.geCrop && !out.some(function (o) { return o.name === S.geCrop; })) out.push({ name: S.geCrop, color: S.geColor || '#639922' });
+    return out;
+  }
+  function geCropPopup() {
+    openOverlay(
+      '<div class="ovl-title">작물 직접 입력</div>' +
+      '<div class="ovl-msg">목록에 없는 작물명을 입력하세요.</div>' +
+      '<input class="ein" id="gcpName" style="margin-top:12px;font-size:15px" placeholder="예) 양파">' +
+      '<div class="ovl-btns"><button class="btn" id="gcpCancel">취소</button><button class="btn primary" id="gcpOk">적용</button></div>'
+    );
+    var inp = $('gcpName'); try { inp.focus(); } catch (e) {}
+    $('gcpCancel').onclick = closeOverlay;
+    $('gcpOk').onclick = function () {
+      var nm = (inp.value || '').trim(); if (!nm) { toast('작물명을 입력하세요'); return; }
+      var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41'];
+      S.geCrop = nm; S.geColor = pal[nm.length % pal.length]; S.geDirty = true;
+      closeOverlay(); renderGenEdit();
+    };
+  }
   function renderGenEdit() {
     var i = S.editIdx, g = S.gens[i]; if (!g) { go('home'); return; }
+    if (S.geCropFor !== g.id) { S.geCrop = g.crop; S.geColor = g.color; S.geCropFor = g.id; S.geDirty = false; }
     var v = $('view-genedit');
     var traitTags = g.traits.map(function (t) {
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : t.type === 'text' ? '문자' : ''));
@@ -945,6 +969,11 @@
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · 세대 ' + proj.items.length + ' · 편집 중 ' + esc(g.label) + '</div></div></div>' +
       '<div style="flex:1;padding:16px 14px;overflow:auto">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></label><input class="ein" id="geName" style="margin-top:6px" value="' + esc(g.projName) + '">' +
+        '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:8px">' + geCropChips().map(function (c) {
+          var on = c.name === S.geCrop;
+          return '<button class="pill gecrop' + (on ? ' on' : '') + '" data-c="' + esc(c.name) + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';margin-right:5px"></span>' + esc(c.name) + '</button>';
+        }).join('') + '<button class="pill" id="geCropAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div>' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">포장 / 구역</label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
         genBar +
         // traits
@@ -972,8 +1001,9 @@
         else if (f === 'indivTotal') { var n = parseInt(inp.value); l.indivTotal = n > 0 ? n : 1; }
       });
     }
-    S.geDirty = false;
     v.querySelectorAll('input, select').forEach(function (el) { el.addEventListener('input', function () { S.geDirty = true; }); el.addEventListener('change', function () { S.geDirty = true; }); });
+    v.querySelectorAll('.gecrop').forEach(function (b) { b.onclick = function () { var nm = b.getAttribute('data-c'); var c = geCropChips().filter(function (x) { return x.name === nm; })[0]; S.geCrop = nm; S.geColor = (c && c.color) || S.geColor; S.geDirty = true; renderGenEdit(); }; });
+    $('geCropAdd').onclick = function () { geCropPopup(); };
     $('geBack').onclick = function () { askSaveGenEdit(); };
     $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
     $('geBulk').onclick = function () { collect(); S.bulkIdx = i; S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; go('bulk'); };
@@ -993,7 +1023,8 @@
       collect();
       var newName = $('geName').value.trim() || g.projName;
       var pk = projKeyOf(g);
-      S.gens.forEach(function (x) { if (projKeyOf(x) === pk) x.projName = newName; });
+      var newCrop = S.geCrop || g.crop, newColor = S.geColor || g.color;
+      S.gens.forEach(function (x) { if (projKeyOf(x) === pk) { x.projName = newName; x.crop = newCrop; x.color = newColor; } });
       var zn = $('geZone').value.trim(); if (zn) g.lines.forEach(function (l) { l.zone = zn; });
       S.geDirty = false;
       splitGenByLabel(g, i).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대별로 분리' : '저장됨'); go('home'); }); });
