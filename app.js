@@ -2592,8 +2592,9 @@
       });
       seq.then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; renderPhoto(); toast(fl.length + '장 저장됨'); }).catch(function () { toast('사진 처리 실패'); });
     }
-    $('phFile').onchange = function () { var fl = this.files; this.value = ''; addPhotos(fl); };
-    $('phCam').onchange = function () { var fl = this.files; this.value = ''; if (!fl || !fl.length) { toast('촬영이 취소되었습니다'); return; } addPhotos(fl); };
+    // 주의: FileList 는 input.value 를 비우면 함께 비므로, 먼저 배열로 복사한다
+    $('phFile').onchange = function () { var arr = Array.prototype.slice.call(this.files || []); this.value = ''; if (!arr.length) return; addPhotos(arr); };
+    $('phCam').onchange = function () { var arr = Array.prototype.slice.call(this.files || []); this.value = ''; if (!arr.length) { toast('촬영이 취소되었습니다'); return; } addPhotos(arr); };
     v.querySelectorAll('.pThumb').forEach(function (im) { im.onclick = function () { S.drawId = im.getAttribute('data-id'); go('draw'); }; });
     v.querySelectorAll('.pSel').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); sel[id] = !sel[id]; renderPhoto(); }; });
     v.querySelectorAll('.pSave').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); var p = ps.filter(function (x) { return x.id === id; })[0]; if (p) { savePhotoFile(p); toast('저장됨'); } }; });
