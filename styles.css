@@ -116,3 +116,28 @@ a{color:var(--green-d)}
 @media (min-width: 720px) and (orientation: landscape) {
   #view-collect > #cMain { flex: 1 1 480px; }
 }
+
+/* ===== 폰: 야장 수집을 한 화면에 ===== */
+@media (max-width: 719px) {
+  #cHead { padding: 8px 12px 7px !important; }
+  #cGenBar { padding-top: 6px !important; }
+  #cCard { margin: 8px 12px 0 !important; }
+  #cCard .card { padding: 9px 11px !important; }
+  #cDate { padding: 7px 12px 0 !important; }
+  #cPills { padding: 6px 12px 6px !important; }
+  #cInput { padding: 2px 12px 6px !important; min-height: 0 !important; }
+  #cInput .numDisp { height: 46px !important; font-size: 24px !important; }
+  #cInput .grid { gap: 6px !important; margin-top: 8px !important; }
+  #cInput .key { height: 42px !important; font-size: 17px !important; }
+  #cQuick { padding: 0 12px 8px !important; }
+  #cQuick .btn { height: 40px !important; font-size: 12px !important; }
+  #cHist { padding: 0 12px 6px !important; }
+  #cNav { padding: 7px 12px 10px !important; }
+  #cNav .btn { height: 42px !important; }
+}
+@media (max-width: 719px) and (max-height: 780px) {
+  #cInput .key { height: 38px !important; font-size: 16px !important; }
+  #cInput .numDisp { height: 42px !important; font-size: 22px !important; }
+  #cQuick .btn { height: 37px !important; }
+  #cNav .btn { height: 40px !important; }
+}

@@ -178,6 +178,45 @@
     return { comb: comb, line: line, sel: sel };
   }
   function projectOf(key) { var all = projects(); for (var i = 0; i < all.length; i++) if (all[i].id === key) return all[i]; return null; }
+  // ----- 과제 폴더 -----
+  function folders() { return S.folders || (S.folders = []); }
+  function saveFolders() { return kvSet('folders', folders()); }
+  function folderOf(projKey) { var fs = folders(); for (var i = 0; i < fs.length; i++) if (fs[i].ids.indexOf(projKey) >= 0) return fs[i]; return null; }
+  function folderById(id) { var fs = folders(); for (var i = 0; i < fs.length; i++) if (fs[i].id === id) return fs[i]; return null; }
+  function cleanFolders() {
+    var keys = projects().map(function (p) { return p.id; });
+    S.folders = folders().filter(function (f) { f.ids = f.ids.filter(function (k) { return keys.indexOf(k) >= 0; }); return f.ids.length > 0; });
+  }
+  function makeFolder(aKey, bKey) {
+    var f = { id: 'F' + Date.now(), name: '새 폴더', ids: [aKey, bKey].filter(Boolean) };
+    folders().forEach(function (x) { x.ids = x.ids.filter(function (k) { return f.ids.indexOf(k) < 0; }); });
+    folders().push(f); cleanFolders();
+    saveFolders().then(function () { renderHome(); renameFolderPopup(f.id, true); });
+  }
+  function addToFolder(fid, projKey) {
+    var f = folderById(fid); if (!f) return;
+    folders().forEach(function (x) { x.ids = x.ids.filter(function (k) { return k !== projKey; }); });
+    if (f.ids.indexOf(projKey) < 0) f.ids.push(projKey);
+    cleanFolders(); saveFolders().then(function () { renderHome(); toast('폴더에 넣음'); });
+  }
+  function removeFromFolder(projKey) {
+    folders().forEach(function (x) { x.ids = x.ids.filter(function (k) { return k !== projKey; }); });
+    cleanFolders(); saveFolders().then(function () { renderHome(); toast('폴더에서 뺐습니다'); });
+  }
+  function renameFolderPopup(fid, isNew) {
+    var f = folderById(fid); if (!f) return;
+    openOverlay(
+      '<div class="ovl-title">' + (isNew ? '폴더 만들기' : '폴더 이름 수정') + '</div>' +
+      '<div class="ovl-msg">폴더 이름을 입력하세요.</div>' +
+      '<input class="ein" id="fdName" style="margin-top:12px;font-size:15px" value="' + esc(f.name) + '">' +
+      '<div class="ovl-btns">' + (isNew ? '' : '<button class="btn" id="fdDel" style="color:#C0392B;border-color:#E3B4AE">폴더 해제</button>') +
+      '<button class="btn" id="fdCancel">취소</button><button class="btn primary" id="fdOk">저장</button></div>'
+    );
+    var inp = $('fdName'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('fdCancel').onclick = closeOverlay;
+    if ($('fdDel')) $('fdDel').onclick = function () { S.folders = folders().filter(function (x) { return x.id !== fid; }); closeOverlay(); saveFolders().then(function () { renderHome(); toast('폴더 해제됨'); }); };
+    $('fdOk').onclick = function () { f.name = (inp.value || '').trim() || f.name; closeOverlay(); saveFolders().then(function () { renderHome(); toast(isNew ? '폴더 생성됨' : '이름 변경됨'); }); };
+  }
   function curProjKey() { return projKeyOf(curGen()); }
   function genRole(label) { return label === 'F1' ? '조합' : (label === 'F#' ? '범용' : '계통'); }
   function curLine() { return curGen().lines[S.lineIdx]; }
@@ -748,6 +787,16 @@
       kvSet('gens', S.gens).then(function () { S.editIdx = fromIdx + 1; renderGenEdit(); toast(pick + ' 세대 추가됨'); });
     };
   }
+  function leaveGenEdit(cb) {
+    if (!S.geDirty) { S.geDirty = false; if (cb) cb(true); else go('home'); return; }
+    openOverlay(
+      '<div class="ovl-title">저장하지 않고 나가기</div>' +
+      '<div class="ovl-msg">설정이 저장되지 않았습니다.<br>저장하지 않고 나가시겠습니까?</div>' +
+      '<div class="ovl-btns"><button class="btn" id="geNo">아니오</button><button class="btn primary" id="geYes">예</button></div>'
+    );
+    $('geNo').onclick = function () { closeOverlay(); if (cb) cb(false); };
+    $('geYes').onclick = function () { closeOverlay(); S.geDirty = false; if (cb) cb(true); else go('home'); };
+  }
   function renderGenEdit() {
     var i = S.editIdx, g = S.gens[i]; if (!g) { go('home'); return; }
     var v = $('view-genedit');
@@ -801,7 +850,9 @@
         else if (f === 'indivTotal') { var n = parseInt(inp.value); l.indivTotal = n > 0 ? n : 1; }
       });
     }
-    $('geBack').onclick = function () { go('home'); };
+    S.geDirty = false;
+    v.querySelectorAll('input, select').forEach(function (el) { el.addEventListener('input', function () { S.geDirty = true; }); el.addEventListener('change', function () { S.geDirty = true; }); });
+    $('geBack').onclick = function () { leaveGenEdit(); };
     $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
     $('geBulk').onclick = function () { collect(); S.bulkIdx = i; S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; go('bulk'); };
     $('geDel').onclick = function () { deleteProject(projKeyOf(g)); };
@@ -822,6 +873,7 @@
       var pk = projKeyOf(g);
       S.gens.forEach(function (x) { if (projKeyOf(x) === pk) x.projName = newName; });
       var zn = $('geZone').value.trim(); if (zn) g.lines.forEach(function (l) { l.zone = zn; });
+      S.geDirty = false;
       splitGenByLabel(g, i).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대별로 분리' : '저장됨'); go('home'); }); });
     };
   }
@@ -859,6 +911,96 @@
     });
   }
 
+  function projRowHTML(p, inFolder) {
+    var cur = p.id === curProjKey();
+    return '<div class="hprojrow" data-p="' + esc(p.id) + '" style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px' + (inFolder ? ';margin-left:12px' : '') + '">' +
+      '<div style="display:flex;align-items:center;gap:9px">' +
+        '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
+        '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(p.crop) + ' · 세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
+        (inFolder ? '<button class="btn hprojout" data-p="' + esc(p.id) + '" style="height:30px;padding:0 8px;font-size:11px;flex:0 0 auto">빼기</button>' : '') +
+        '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
+        '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
+      '</div>' +
+      '<div class="scroll-x" style="gap:6px;margin-top:9px">' + p.items.map(function (it) {
+        var on = it.idx === S.genIdx;
+        return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
+      }).join('') + '</div>' +
+    '</div>';
+  }
+  // 과제 행을 꾹 눌러 다른 과제·폴더 위로 끌면 폴더로 묶임
+  function setupProjDrag() {
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.hprojrow'));
+    if (!rows.length) return;
+    var drag = null, lp = null, target = null;
+    function clearHi() { document.querySelectorAll('.hprojrow,.hfolder').forEach(function (e) { e.style.outline = ''; }); }
+    function start(row, x, y) {
+      if (drag) return;
+      drag = { row: row, x0: x, y0: y };
+      row.style.opacity = '0.92'; row.style.boxShadow = '0 10px 24px rgba(0,0,0,.22)';
+      row.style.position = 'relative'; row.style.zIndex = '5'; row.style.pointerEvents = 'none';
+      haptic(18); toast('다른 과제나 폴더 위로 끌어 놓으세요');
+    }
+    function move(x, y) {
+      if (!drag) return;
+      drag.row.style.transform = 'translate(' + (x - drag.x0) + 'px,' + (y - drag.y0) + 'px)';
+      var el = document.elementFromPoint(x, y);
+      var t = el && el.closest ? (el.closest('.hprojrow') || el.closest('.hfolder')) : null;
+      if (t === drag.row) t = null;
+      if (t !== target) { clearHi(); target = t; if (target) { target.style.outline = '2px solid #639922'; haptic(8); } }
+    }
+    function end() {
+      if (!drag) return;
+      var row = drag.row, t = target; drag = null; target = null;
+      row.style.transform = ''; row.style.opacity = ''; row.style.boxShadow = ''; row.style.zIndex = ''; row.style.position = ''; row.style.pointerEvents = '';
+      clearHi();
+      if (!t) return;
+      var src = row.getAttribute('data-p');
+      if (t.classList.contains('hfolder')) addToFolder(t.getAttribute('data-f'), src);
+      else {
+        var dst = t.getAttribute('data-p');
+        var f = folderOf(dst);
+        if (f) addToFolder(f.id, src); else makeFolder(dst, src);
+      }
+    }
+    rows.forEach(function (row) {
+      function press(x, y) { lp = setTimeout(function () { lp = null; start(row, x, y); }, 420); }
+      row.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('button,.pill')) return; press(e.clientX, e.clientY); });
+      row.addEventListener('touchstart', function (e) { if (e.target.closest && e.target.closest('button,.pill')) return; var t = e.touches[0]; if (t) press(t.clientX, t.clientY); }, { passive: true });
+    });
+    function cancelLp() { if (lp) { clearTimeout(lp); lp = null; } }
+    S._projDrag = { move: move, end: end, cancel: cancelLp, active: function () { return !!drag; } };
+    if (!S._projDragBound) {
+      S._projDragBound = true;
+      var R = function () { return S._projDrag || null; };
+      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientX, e.clientY); } else r.cancel(); }, { passive: false });
+      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientX, t.clientY); } } else r.cancel(); }, { passive: false });
+      document.addEventListener('pointerup', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
+      document.addEventListener('touchend', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
+    }
+  }
+  function renderProjList() {
+    cleanFolders();
+    var all = projects(), byId = {};
+    all.forEach(function (p) { byId[p.id] = p; });
+    var html = '', used = {};
+    S.folderOpen = S.folderOpen || {};
+    folders().forEach(function (f) {
+      var ps = f.ids.map(function (k) { return byId[k]; }).filter(Boolean);
+      if (!ps.length) return;
+      ps.forEach(function (p) { used[p.id] = 1; });
+      var open = S.folderOpen[f.id] !== false;
+      html += '<div class="hfolder" data-f="' + esc(f.id) + '" style="border:0.5px dashed var(--border-strong);border-radius:12px;padding:8px 8px 2px;margin-bottom:10px;background:var(--surface-1)">' +
+        '<div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">' +
+          '<button class="btn hfoldtoggle" data-f="' + esc(f.id) + '" style="width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center">' + ico(open ? 'chevron-down' : 'chevron-right', 'var(--text-secondary)', 16) + '</button>' +
+          '<div style="flex:1;min-width:0;font-size:13px;font-weight:600">' + ico('folder', '#639922', 14) + ' ' + esc(f.name) + ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">과제 ' + ps.length + '</span></div>' +
+          '<button class="btn hfoldedit" data-f="' + esc(f.id) + '" style="width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center">' + ico('pencil', 'var(--text-secondary)', 15) + '</button>' +
+        '</div>' +
+        (open ? ps.map(function (p) { return projRowHTML(p, true); }).join('') : '') +
+      '</div>';
+    });
+    all.forEach(function (p) { if (!used[p.id]) html += projRowHTML(p, false); });
+    return html;
+  }
   function renderHome() {
     var v = $('view-home');
     if (!S.gens.length) { v.innerHTML = homeEmptyHTML(); if ($('heGear')) $('heGear').onclick = function () { go('settings'); }; if ($('heNew')) $('heNew').onclick = function () { startNew(); }; return; }
@@ -884,21 +1026,7 @@
         stat(hc.comb, '조합') + stat(hc.line, '계통') + stat(hc.sel, '선발') + statP() +
       '</div>' +
       '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span><button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button></div>' +
-        '<div class="projgrid">' + projects().map(function (p) {
-          var cur = p.id === curProjKey();
-          return '<div style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px">' +
-            '<div style="display:flex;align-items:center;gap:9px">' +
-              '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
-              '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(p.crop) + ' · 세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
-              '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
-              '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
-            '</div>' +
-            '<div class="scroll-x" style="gap:6px;margin-top:9px">' + p.items.map(function (it) {
-              var on = it.idx === S.genIdx;
-              return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
-            }).join('') + '</div>' +
-          '</div>';
-        }).join('') + '</div>' +
+        '<div class="projgrid">' + renderProjList() + '</div>' +
       '</div>' +
       '<div style="height:20px"></div>';
     renderSyncStat($('syncStat'));
@@ -910,6 +1038,10 @@
     document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
     document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; go('genedit'); } }; });
     document.querySelectorAll('.hprojdel').forEach(function (b) { b.onclick = function () { deleteProject(b.getAttribute('data-p')); }; });
+    document.querySelectorAll('.hprojout').forEach(function (b) { b.onclick = function () { removeFromFolder(b.getAttribute('data-p')); }; });
+    document.querySelectorAll('.hfoldedit').forEach(function (b) { b.onclick = function () { renameFolderPopup(b.getAttribute('data-f')); }; });
+    document.querySelectorAll('.hfoldtoggle').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-f'); S.folderOpen = S.folderOpen || {}; S.folderOpen[id] = (S.folderOpen[id] === false); renderHome(); }; });
+    setupProjDrag();
     function stat(n, label) { return '<div style="flex:1;min-width:0;background:var(--surface-1);border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
     function statP() { return '<div style="flex:1;min-width:0;background:#FAEEDA;border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
   }
@@ -942,7 +1074,7 @@
       // input
       '<div id="cInput" style="padding:2px 14px 8px;min-height:180px"></div>' +
       '<div id="cHist" style="padding:0 14px 10px"></div>' +
-      '<div style="display:flex;gap:8px;padding:0 14px 10px">' +
+      '<div id="cQuick" style="display:flex;gap:8px;padding:0 14px 10px">' +
         '<button class="btn" id="qPhoto" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('photo', 'var(--text-primary)', 18) + ' 사진<span id="qPhotoN" style="color:#3B6D11;font-weight:600"></span></button>' +
         '<button class="btn" id="qDraw" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('brush', 'var(--text-primary)', 18) + ' 그리기</button>' +
         '<button class="btn" id="qVoice" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('microphone', 'var(--text-primary)', 18) + ' 음성</button>' +
@@ -1090,7 +1222,7 @@
       html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', '#3B6D11', 11) : '') + '</button>';
     });
     html += '<button class="btn" id="cNewDate" style="padding:5px 10px;font-size:12px;border-radius:16px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 13) + ' 새 조사</button></div>' +
-      '<div style="font-size:10px;color:var(--text-muted);margin-top:5px">선택된 조사일을 다시 누르면 수정·삭제할 수 있어요 · 시계열(' + ico('clock', '#3B6D11', 10) + ')은 조사일마다 저장, 1회성은 마지막 측정 조사일 기록</div>';
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">조사일 탭 → 수정·삭제 · ' + ico('clock', '#3B6D11', 10) + ' 시계열은 조사일별 저장</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
     $('cNewDate').onclick = function () { newDatePopup(); };
@@ -1211,7 +1343,7 @@
 
     if (t.type === 'numeric' || t.type === 'counter' || t.type === 'ratio') {
       var disp = document.createElement('div');
-      disp.style.cssText = 'height:54px;border:0.5px solid var(--border-strong);border-radius:12px;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 16px;font-size:28px;font-weight:500;color:' + ((v == null || v === '') ? 'var(--text-muted)' : 'var(--text-primary)');
+      disp.className = 'numDisp'; disp.style.cssText = 'height:54px;border:0.5px solid var(--border-strong);border-radius:12px;display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 16px;font-size:28px;font-weight:500;color:' + ((v == null || v === '') ? 'var(--text-muted)' : 'var(--text-primary)');
       disp.innerHTML = '<span>' + ((v == null || v === '') ? '—' : esc(v)) + '</span>' + (t.type === 'ratio' ? '<span style="font-size:17px;color:var(--text-secondary)">%</span>' : '');
       area.appendChild(disp);
       var pad = document.createElement('div'); pad.className = 'grid'; pad.style.cssText = 'grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px';
@@ -2797,6 +2929,11 @@
         pushNav(); return;
       }
       // 3) 하위 화면이면 상위 화면으로
+      if (S.view === 'genedit' && S.geDirty) {
+        pushNav();
+        leaveGenEdit(function (ok) { if (ok) { go('home'); pushNav(); } });
+        return;
+      }
       var t = BACK_TO[S.view];
       if (t) {
         if (t === 'genedit' && S.bulkIdx != null) S.editIdx = S.bulkIdx;
@@ -2819,6 +2956,7 @@
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
       if (!S.settings.deviceId) S.settings.deviceId = 'dev-' + Math.random().toString(36).slice(2, 8);
       S.indivSel = await kvGet('indivSel') || {};
+      S.folders = await kvGet('folders') || [];
       if (window.innerWidth >= 900) S.showMap = true;
       S.lastSync = await kvGet('lastSync') || null;
       if (S.genIdx >= S.gens.length) S.genIdx = 0;
