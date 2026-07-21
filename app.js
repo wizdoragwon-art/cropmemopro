@@ -370,6 +370,7 @@
     });
     document.querySelectorAll('#tabbar .tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-view') === view); });
     renderCurrent();
+    try { window.dispatchEvent(new Event('cm-nav')); } catch (e) {}
     window.scrollTo(0, 0);
   }
   function renderCurrent() {
@@ -719,6 +720,42 @@
       '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button></div>';
   }
   function selectGen(i) { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var g = curGen(); S.date = g.surveyDates[g.surveyDates.length - 1]; S.trait = g.traits[0].id; loadVals().then(function () { go('collect'); }); }
+  // 과제 복제 — 구성(세대·라벨·형질)만 복사하고 조사 내용은 제외
+  function duplicateProjectPopup(key) {
+    var src = projectOf(key); if (!src) return;
+    openOverlay(
+      '<div class="ovl-title">과제 복제</div>' +
+      '<div class="ovl-msg"><b>' + esc(src.name) + '</b>의 세대 ' + src.items.length + '개 · 라벨번호 ' + src.lines + '개와 형질세트를 그대로 복사합니다.<br><span style="color:#8A5A12">조사값·사진·선발 표시는 복사되지 않습니다.</span></div>' +
+      '<input class="ein" id="dupName" style="margin-top:12px;font-size:15px" value="' + esc(src.name + ' (복사)') + '">' +
+      '<div class="ovl-btns"><button class="btn" id="dupCancel">취소</button><button class="btn primary" id="dupOk">복제</button></div>'
+    );
+    var inp = $('dupName'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('dupCancel').onclick = closeOverlay;
+    $('dupOk').onclick = function () {
+      var nm = (inp.value || '').trim() || (src.name + ' (복사)');
+      closeOverlay(); duplicateProject(key, nm);
+    };
+  }
+  function duplicateProject(key, newName) {
+    var src = projectOf(key); if (!src) return;
+    var base = Date.now(), pid = 'P' + base, made = [];
+    src.items.forEach(function (it, gi) {
+      var g = it.g;
+      made.push({
+        id: 'G' + base + '_' + gi, projId: pid, projName: newName, crop: g.crop, color: g.color,
+        label: g.label, prefix: g.prefix, surveyDates: [todayStr()],
+        traits: JSON.parse(JSON.stringify(g.traits || [])),
+        lines: (g.lines || []).map(function (l) { var c = JSON.parse(JSON.stringify(l)); c.selected = false; return c; })
+      });
+    });
+    if (!made.length) { toast('복제할 세대가 없습니다'); return; }
+    var at = src.items[src.items.length - 1].idx + 1;
+    S.gens.splice.apply(S.gens, [at, 0].concat(made));
+    if (S.genIdx >= at) S.genIdx += made.length;
+    var f = folderOf(key);
+    if (f) { f.ids.push(pid); saveFolders(); }
+    kvSet('gens', S.gens).then(function () { renderHome(); toast('복제됨 · ' + newName); });
+  }
   function deleteProject(key) {
     var p = projectOf(key); if (!p) return;
     if (!confirm('"' + p.name + '" 과제를 삭제할까요?\n세대 ' + p.items.length + '개와 수집한 데이터가 모두 삭제됩니다.')) return;
@@ -787,16 +824,6 @@
       kvSet('gens', S.gens).then(function () { S.editIdx = fromIdx + 1; renderGenEdit(); toast(pick + ' 세대 추가됨'); });
     };
   }
-  function leaveGenEdit(cb) {
-    if (!S.geDirty) { S.geDirty = false; if (cb) cb(true); else go('home'); return; }
-    openOverlay(
-      '<div class="ovl-title">저장하지 않고 나가기</div>' +
-      '<div class="ovl-msg">설정이 저장되지 않았습니다.<br>저장하지 않고 나가시겠습니까?</div>' +
-      '<div class="ovl-btns"><button class="btn" id="geNo">아니오</button><button class="btn primary" id="geYes">예</button></div>'
-    );
-    $('geNo').onclick = function () { closeOverlay(); if (cb) cb(false); };
-    $('geYes').onclick = function () { closeOverlay(); S.geDirty = false; if (cb) cb(true); else go('home'); };
-  }
   function renderGenEdit() {
     var i = S.editIdx, g = S.gens[i]; if (!g) { go('home'); return; }
     var v = $('view-genedit');
@@ -852,7 +879,7 @@
     }
     S.geDirty = false;
     v.querySelectorAll('input, select').forEach(function (el) { el.addEventListener('input', function () { S.geDirty = true; }); el.addEventListener('change', function () { S.geDirty = true; }); });
-    $('geBack').onclick = function () { leaveGenEdit(); };
+    $('geBack').onclick = function () { askSaveGenEdit(); };
     $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
     $('geBulk').onclick = function () { collect(); S.bulkIdx = i; S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; go('bulk'); };
     $('geDel').onclick = function () { deleteProject(projKeyOf(g)); };
@@ -867,7 +894,7 @@
     };
     $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
     v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } if (!confirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.')) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }; });
-    $('geSave').onclick = function () {
+    S._geSave = function () {
       collect();
       var newName = $('geName').value.trim() || g.projName;
       var pk = projKeyOf(g);
@@ -876,6 +903,7 @@
       S.geDirty = false;
       splitGenByLabel(g, i).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대별로 분리' : '저장됨'); go('home'); }); });
     };
+    $('geSave').onclick = function () { S._geSave(); };
   }
   // move lines whose 세대 differs into their own generation entries
   function splitGenByLabel(g, idx) {
@@ -918,6 +946,7 @@
         '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
         '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(p.crop) + ' · 세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
         (inFolder ? '<button class="btn hprojout" data-p="' + esc(p.id) + '" style="height:30px;padding:0 8px;font-size:11px;flex:0 0 auto">빼기</button>' : '') +
+        '<button class="btn hprojcopy" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('copy', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
       '</div>' +
@@ -1038,6 +1067,7 @@
     document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
     document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; go('genedit'); } }; });
     document.querySelectorAll('.hprojdel').forEach(function (b) { b.onclick = function () { deleteProject(b.getAttribute('data-p')); }; });
+    document.querySelectorAll('.hprojcopy').forEach(function (b) { b.onclick = function () { duplicateProjectPopup(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hprojout').forEach(function (b) { b.onclick = function () { removeFromFolder(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hfoldedit').forEach(function (b) { b.onclick = function () { renameFolderPopup(b.getAttribute('data-f')); }; });
     document.querySelectorAll('.hfoldtoggle').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-f'); S.folderOpen = S.folderOpen || {}; S.folderOpen[id] = (S.folderOpen[id] === false); renderHome(); }; });
@@ -2884,66 +2914,50 @@
 
   // ---------- boot ----------
   // ---------- Android 뒤로가기 ----------
-  function armBack() { try { history.pushState({ cm: 1 }, ''); } catch (e) {} }
-  function handleBack() {
-    if (document.getElementById('ovl')) { closeOverlay(); return true; }          // 팝업 먼저 닫기
-    if (S.view === 'collect' && S.traitEdit) {                                     // 형질세트 편집 → 들어온 곳으로
-      var from = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
-      if (from === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
-      return true;
-    }
-    if (S.view === 'bulk') { if (S.bulkStage === 'parsed') { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); } else { S.editIdx = S.bulkIdx; go('genedit'); } return true; }
-    if (S.view === 'ocr') { if (S.ocr && S.ocr.stage === 'done') { S.ocr.stage = 'idle'; renderOCR(); } else go('collect'); return true; }
-    if (S.view === 'draw' || S.view === 'photo' || S.view === 'voice' || S.view === 'write') { go(S.view === 'draw' ? 'photo' : 'collect'); return true; }
-    if (S.view === 'new') { if (S.wiz && S.wiz.step > 1) { S.wiz.step--; S._wizScroll = 0; renderNew(); } else { S.wiz = null; go('home'); } return true; }
-    if (S.view === 'genedit') { go('home'); return true; }
-    if (S.view === 'collect' || S.view === 'analysis' || S.view === 'export' || S.view === 'settings') { go('home'); return true; }
-    // 홈: 두 번 눌러야 종료
-    if (Date.now() - (S._exitAt || 0) < 2000) return false;
-    S._exitAt = Date.now(); toast('한 번 더 누르면 앱이 닫힙니다');
-    return true;
-  }
-  function setupBackButton() {
-    armBack();
-    window.addEventListener('popstate', function () {
-      var handled = false;
-      try { handled = handleBack(); } catch (e) { handled = false; }
-      if (handled) armBack();   // 다음 뒤로가기도 앱이 받도록 다시 준비
-    });
-  }
-
-  // ---------- 안드로이드 뒤로가기 ----------
-  var BACK_TO = { collect: 'home', analysis: 'home', export: 'home', settings: 'home', 'new': 'home', genedit: 'home',
-                  bulk: 'genedit', ocr: 'collect', photo: 'collect', draw: 'photo', voice: 'collect', write: 'collect' };
-  function pushNav() { try { history.pushState({ cm: 1, v: S.view }, ''); } catch (e) {} }
+  // ---------- 안드로이드 뒤로가기: 항상 앱이 받아서 홈으로 ----------
+  function armBack(n) { try { for (var i = 0; i < (n || 1); i++) history.pushState({ cm: 1, t: Date.now() }, ''); } catch (e) {} }
   function setupBack() {
-    try { history.replaceState({ cm: 0, v: 'root' }, ''); pushNav(); } catch (e) {}
+    try { history.replaceState({ cm: 0 }, ''); } catch (e) {}
+    armBack(2);
     window.addEventListener('popstate', function () {
-      // 1) 팝업이 열려 있으면 팝업만 닫기
-      if (document.getElementById('ovl')) { closeOverlay(); pushNav(); return; }
-      // 2) 형질세트 편집 중이면 편집만 종료
-      if (S.view === 'collect' && S.traitEdit) {
-        var back = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
-        kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () {
-          if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
-        });
-        pushNav(); return;
-      }
-      // 3) 하위 화면이면 상위 화면으로
-      if (S.view === 'genedit' && S.geDirty) {
-        pushNav();
-        leaveGenEdit(function (ok) { if (ok) { go('home'); pushNav(); } });
-        return;
-      }
-      var t = BACK_TO[S.view];
-      if (t) {
-        if (t === 'genedit' && S.bulkIdx != null) S.editIdx = S.bulkIdx;
-        go(t); pushNav(); return;
-      }
-      // 4) 홈에서는 두 번 눌러 종료
-      if (Date.now() - (S._exitAt || 0) < 2000) { try { history.go(-1); } catch (e) {} return; }
-      S._exitAt = Date.now(); toast('뒤로가기를 한 번 더 누르면 종료됩니다'); pushNav();
+      if (S._exiting) return;                 // 종료 중이면 그대로 둔다
+      var r = null;
+      try { r = onBack(); } catch (e) { r = null; }
+      if (r === 'exit') { S._exiting = true; try { history.back(); } catch (e) {} return; }
+      armBack(1);                             // 다음 뒤로가기도 앱이 받도록 항상 보충
     });
+    // 화면을 옮길 때마다 여유분을 유지
+    window.addEventListener('cm-nav', function () { armBack(1); });
+  }
+  function onBack() {
+    // 1) 팝업이 열려 있으면 팝업만 닫기
+    if (document.getElementById('ovl')) { closeOverlay(); return 'ok'; }
+    // 2) 형질세트 편집 중이면 편집만 종료
+    if (S.view === 'collect' && S.traitEdit) {
+      var from = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
+      kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () {
+        if (from === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
+      });
+      return 'ok';
+    }
+    // 3) 과제 수정 중이면 저장 여부를 묻고 홈으로
+    if (S.view === 'genedit') { askSaveGenEdit(); return 'ok'; }
+    // 4) 그 밖의 화면이면 홈으로
+    if (S.view !== 'home') { go('home'); return 'ok'; }
+    // 5) 홈에서는 두 번 눌러 종료
+    if (Date.now() - (S._exitAt || 0) < 2000) return 'exit';
+    S._exitAt = Date.now(); toast('뒤로가기를 한 번 더 누르면 종료됩니다');
+    return 'ok';
+  }
+  function askSaveGenEdit() {
+    if (!S.geDirty) { go('home'); return; }
+    openOverlay(
+      '<div class="ovl-title">저장하시겠습니까?</div>' +
+      '<div class="ovl-msg">과제 수정 내용이 아직 저장되지 않았습니다.</div>' +
+      '<div class="ovl-btns"><button class="btn" id="gsNo">아니오</button><button class="btn primary" id="gsYes">예</button></div>'
+    );
+    $('gsNo').onclick = function () { closeOverlay(); S.geDirty = false; go('home'); toast('저장하지 않고 나감'); };
+    $('gsYes').onclick = function () { closeOverlay(); if (S._geSave) S._geSave(); else go('home'); };
   }
 
   async function boot() {
