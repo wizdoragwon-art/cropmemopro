@@ -331,26 +331,33 @@
   function postSync(url, payload) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
-  async function syncDrive(url, g, silent) {
+  async function syncDrive(url, silent) {
     var auth = { deviceId: S.settings.deviceId, token: S.settings.token || '' };
-    var proj = projectOf(projKeyOf(g));
-    var built = await buildCSV(proj);
-    if (built) {
-      await postSync(url, Object.assign({ action: 'driveCsv', proj: g.projName, fileName: built.name, csv: built.csv }, auth));
-    }
-    // upload images that haven't been sent yet
+    var allProj = projects(), csvCount = 0, imgCount = 0;
     var sentMap = await kvGet('imgSynced') || {};
-    var files = await collectProjImages(proj);
-    var pending = files.filter(function (f) { return !sentMap[f.name]; });
-    for (var i = 0; i < pending.length; i++) {
-      var f = pending[i];
-      if (!silent) toast('사진 전송 ' + (i + 1) + '/' + pending.length);
+    // 모든 과제의 CSV·사진을 드라이브에 저장 (현재 과제만이 아니라 전체)
+    for (var pi = 0; pi < allProj.length; pi++) {
+      var proj = allProj[pi];
       try {
-        var r = await postSync(url, Object.assign({ action: 'driveFile', proj: g.projName, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
-        if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); }
-      } catch (e) { break; }
+        var built = await buildCSV(proj);
+        if (built) {
+          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, fileName: built.name, csv: built.csv }, auth));
+          if (cr && cr.ok) csvCount++;
+        }
+      } catch (e) {}
+      // upload images that haven't been sent yet
+      var files = await collectProjImages(proj);
+      var pending = files.filter(function (f) { return !sentMap[f.name]; });
+      for (var i = 0; i < pending.length; i++) {
+        var f = pending[i];
+        if (!silent) toast(proj.name + ' 사진 전송 ' + (i + 1) + '/' + pending.length);
+        try {
+          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
+          if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); imgCount++; }
+        } catch (e) { break; }
+      }
     }
-    return { csv: built ? built.name : null, images: pending.length };
+    return { csv: csvCount, images: imgCount };
   }
   async function trySync(silent) {
     if (S.settings.syncOn === false) { if (!silent) toast('동기화가 꺼져 있습니다 · 홈에서 켜주세요'); return; }
@@ -359,9 +366,12 @@
     var url = S.settings.syncUrl;
     if (!url) { if (!silent) toast('설정에서 동기화 URL을 입력하세요'); return; }
     var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
-    var g = curGen(), batch = [];
-    g.lines.forEach(function (l) {
-      batch.push({ table: 'line', key: g.id + '|' + l.id, data: { projId: g.id, genId: g.id, label: l.label, pedigree: l.pedigree || '', zone: l.zone, row: l.row, col: l.col, rep: l.rep, block: l.block, indivTotal: l.indivTotal, selected: !!l.selected }, updatedAt: Date.now() });
+    var batch = [], now = Date.now();
+    // 모든 과제·세대의 계통 정보를 함께 올린다 (현재 세대만이 아니라 전체)
+    S.gens.forEach(function (gg) {
+      gg.lines.forEach(function (l) {
+        batch.push({ table: 'line', key: gg.id + '|' + l.id, data: { projId: gg.id, genId: gg.id, label: l.label, pedigree: l.pedigree || '', zone: l.zone, row: l.row, col: l.col, rep: l.rep, block: l.block, indivTotal: l.indivTotal, selected: !!l.selected }, updatedAt: now });
+      });
     });
     dirty.forEach(function (r) {
       batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (recSeries(r) && r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
@@ -369,31 +379,36 @@
     S.syncing = true; renderCurrent();
     try {
       var applied = 0;
-      if (dirty.length) {
+      if (batch.length) {
         var j = await postSync(url, { deviceId: S.settings.deviceId, token: S.settings.token || '', batch: batch });
         if (!j || !j.ok) { if (!silent) toast('동기화 실패 · 서버 응답 오류'); return; }
         applied = j.applied || 0;
         for (var i = 0; i < dirty.length; i++) { dirty[i].dirty = 0; await obsPut(dirty[i]); }
       }
-      var dr = await syncDrive(url, g, silent);
+      var dr = await syncDrive(url, silent);
       S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
-      if (!silent) toast('동기화 완료 · 시트 ' + applied + '건' + (dr.csv ? ' · CSV 저장' : '') + (dr.images ? ' · 사진 ' + dr.images + '장' : ''));
+      if (!silent) toast('동기화 완료 · 시트 ' + applied + '건' + (dr.csv ? ' · CSV ' + dr.csv + '개 과제' : '') + (dr.images ? ' · 사진 ' + dr.images + '장' : ''));
     } catch (e) {
       if (!silent) toast('동기화 실패 · 연결/URL 확인');
     } finally { S.syncing = false; updatePending(); renderCurrent(); }
   }
 
   async function trySyncOD(silent) {
-    var g = curGen(), proj = projectOf(projKeyOf(g));
-    if (!proj) return;
+    var allProj = projects();
+    if (!allProj.length) return;
     S.syncing = true; renderCurrent();
     try {
       var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
-      var res = await syncOneDrive(proj, silent);
-      if (!res.ok) { if (!silent) toast('OneDrive 전송 실패 · 연결 상태를 확인하세요'); return; }
+      // 모든 과제를 OneDrive에 저장 (현재 과제만이 아니라 전체)
+      var okAny = false, csvCount = 0, imgCount = 0;
+      for (var pi = 0; pi < allProj.length; pi++) {
+        var res = await syncOneDrive(allProj[pi], silent);
+        if (res.ok) { okAny = true; if (res.csv) csvCount++; imgCount += res.images || 0; }
+      }
+      if (!okAny) { if (!silent) toast('OneDrive 전송 실패 · 연결 상태를 확인하세요'); return; }
       for (var i = 0; i < dirty.length; i++) { dirty[i].dirty = 0; await obsPut(dirty[i]); }
       S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
-      if (!silent) toast('OneDrive 저장 완료' + (res.csv ? ' · CSV' : '') + (res.images ? ' · 사진 ' + res.images + '장' : ''));
+      if (!silent) toast('OneDrive 저장 완료' + (csvCount ? ' · CSV ' + csvCount + '개 과제' : '') + (imgCount ? ' · 사진 ' + imgCount + '장' : ''));
     } catch (e) {
       if (!silent) toast('OneDrive 전송 실패');
     } finally { S.syncing = false; updatePending(); renderCurrent(); }

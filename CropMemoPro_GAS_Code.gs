@@ -50,7 +50,7 @@ var SYNC_TOKEN = '';   // 공유 비밀키. 비워두면 검사 안 함. 운영 
 var SHEETS = {
   project:    ['key','name','crop','goal','status','updatedAt','deleted'],
   generation: ['key','projId','label','stage','updatedAt','deleted'],
-  line:       ['key','projId','genId','label','zone','row','col','rep','block','indivTotal','selected','updatedAt','deleted','pedigree'],
+  line:       ['key','projId','genId','label','pedigree','zone','row','col','rep','block','indivTotal','selected','updatedAt','deleted'],
   trait:      ['key','genId','name','type','unit','scale','updatedAt','deleted'],
   observation:['key','projId','genId','lineId','indiv','traitId','value','updatedAt','deleted']
 };
@@ -63,13 +63,6 @@ function setup() {
     if (sh.getLastRow() === 0) {
       sh.getRange(1,1,1,SHEETS[name].length).setValues([SHEETS[name]]);
       sh.setFrozenRows(1);
-    } else {
-      // 기존 시트: 새로 추가된 열(예: pedigree) 머리글을 끝에 보강(데이터는 그대로)
-      var hdr = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
-      if (hdr.length < SHEETS[name].length) {
-        sh.getRange(1,1,1,SHEETS[name].length).setValues([SHEETS[name]]);
-        sh.setFrozenRows(1);
-      }
     }
   });
   // 기본 'Sheet1' 정리(비어 있으면)
