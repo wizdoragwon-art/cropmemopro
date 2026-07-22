@@ -967,13 +967,13 @@
     }).join('');
     var rows = g.lines.map(function (l, li) {
       return '<tr style="border-top:0.5px solid var(--border)">' +
-        '<td style="padding:3px 4px;color:var(--text-muted);font-size:11px;text-align:center">' + (li + 1) + '</td>' +
-        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="label" value="' + esc(l.label) + '" style="width:100%;min-width:96px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 7px;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="pedigree" value="' + esc(l.pedigree || '') + '" placeholder="품종명/Pedigree" style="width:100%;min-width:110px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 7px;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="gen" value="' + esc(l.gen || g.label || '') + '" style="width:58px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 6px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="rep" type="number" value="' + (l.rep || '') + '" style="width:50px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 4px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="indivTotal" type="number" value="' + (l.indivTotal || '') + '" style="width:52px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 4px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 2px"><button class="btn geLdel" data-i="' + li + '" style="width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 14) + '</button></td></tr>';
+        '<td style="padding:3px 1px;color:var(--text-muted);font-size:11px;text-align:center">' + (li + 1) + '</td>' +
+        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="label" value="' + esc(l.label) + '" style="width:100%;min-width:0;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 5px;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="pedigree" value="' + esc(l.pedigree || '') + '" placeholder="품종명/Pedigree" style="width:100%;min-width:0;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 5px;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="gen" value="' + esc(l.gen || g.label || '') + '" style="width:44px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 3px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="rep" type="number" value="' + (l.rep || '') + '" style="width:38px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 2px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="indivTotal" type="number" value="' + (l.indivTotal || '') + '" style="width:40px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 2px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 0"><button class="btn geLdel" data-i="' + li + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 13) + '</button></td></tr>';
     }).join('');
     var proj = projectOf(projKeyOf(g)) || { items: [{ g: g, idx: i }], name: g.projName };
     var genBar = '<div style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">세대 <b style="color:var(--text-primary)">' + proj.items.length + '</b>개 · 편집할 세대 선택</span><button class="btn" id="geAddGen" style="height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 13) + ' 세대 추가</button></div>' +
@@ -999,7 +999,7 @@
         // lines table
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">등록 조합·계통 <b style="color:var(--text-primary)">' + g.lines.length + '</b></span><button class="btn" id="geBulk" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('table', 'var(--text-primary)', 14) + ' 일괄등록</button></div>' +
         '<div style="max-height:300px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
-          '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1"><th style="font-size:11px;padding:6px 4px;width:26px">#</th><th style="font-size:11px;padding:6px 4px;text-align:left">라벨번호</th><th style="font-size:11px;padding:6px 4px;text-align:left">품종명/Pedigree</th><th style="font-size:11px;padding:6px 4px">세대</th><th style="font-size:11px;padding:6px 4px">반복</th><th style="font-size:11px;padding:6px 4px">개체수</th><th style="width:34px"></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:22px"><col><col><col style="width:48px"><col style="width:42px"><col style="width:44px"><col style="width:30px"></colgroup><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1"><th style="font-size:11px;padding:6px 1px">#</th><th style="font-size:11px;padding:6px 2px;text-align:left">라벨번호</th><th style="font-size:11px;padding:6px 2px;text-align:left">품종명/Pedigree</th><th style="font-size:11px;padding:6px 1px">세대</th><th style="font-size:11px;padding:6px 1px">반복</th><th style="font-size:11px;padding:6px 1px">개체수</th><th style="padding:0"></th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
         '<button class="btn" id="geLadd" style="width:100%;height:40px;font-size:13px;margin-top:8px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 계통 추가</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">표에서 직접 수정할 수 있습니다. 세대를 다르게 적으면 저장 시 해당 세대 과제로 분리됩니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
@@ -1277,6 +1277,8 @@
     attachSwipe($('cInput'), moveIndiv, moveLine);
     attachSwipe($('cCard'), moveIndiv, moveLine);
     attachSwipe($('cHist'), moveIndiv, moveLine);
+    attachSwipe($('cQuick'), moveIndiv, moveLine);
+    attachSwipe($('cNav'), moveIndiv, moveLine);
   }
   function refreshCollect() {
     if (S.view !== 'collect' || S.traitEdit) return;
