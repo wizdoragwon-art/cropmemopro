@@ -1103,7 +1103,7 @@
   function setupProjDrag() {
     var rows = Array.prototype.slice.call(document.querySelectorAll('.hprojrow'));
     if (!rows.length) return;
-    var drag = null, lp = null, target = null;
+    var drag = null, lp = null, target = null, sx = 0, sy = 0;
     function clearHi() { document.querySelectorAll('.hprojrow,.hfolder').forEach(function (e) { e.style.outline = ''; }); }
     function start(row, x, y) {
       if (drag) return;
@@ -1135,17 +1135,20 @@
       }
     }
     rows.forEach(function (row) {
-      function press(x, y) { lp = setTimeout(function () { lp = null; start(row, x, y); }, 420); }
+      // 그룹화용 드래그: 살짝만 스와이프해도 잡히지 않도록 더 길게(650ms) 지그시 누른 뒤 시작
+      function press(x, y) { sx = x; sy = y; cancelLp(); lp = setTimeout(function () { lp = null; start(row, x, y); }, 650); }
       row.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('button,.pill')) return; press(e.clientX, e.clientY); });
       row.addEventListener('touchstart', function (e) { if (e.target.closest && e.target.closest('button,.pill')) return; var t = e.touches[0]; if (t) press(t.clientX, t.clientY); }, { passive: true });
     });
     function cancelLp() { if (lp) { clearTimeout(lp); lp = null; } }
-    S._projDrag = { move: move, end: end, cancel: cancelLp, active: function () { return !!drag; } };
+    // 대기 중 손가락이 조금이라도(12px↑) 움직이면 스크롤/스와이프로 보고 픽업을 취소
+    function moveWait(x, y) { if (lp != null && (Math.abs(x - sx) > 12 || Math.abs(y - sy) > 12)) cancelLp(); }
+    S._projDrag = { move: move, moveWait: moveWait, end: end, cancel: cancelLp, active: function () { return !!drag; } };
     if (!S._projDragBound) {
       S._projDragBound = true;
       var R = function () { return S._projDrag || null; };
-      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientX, e.clientY); } else r.cancel(); }, { passive: false });
-      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientX, t.clientY); } } else r.cancel(); }, { passive: false });
+      document.addEventListener('pointermove', function (e) { var r = R(); if (!r) return; if (r.active()) { e.preventDefault(); r.move(e.clientX, e.clientY); } else r.moveWait(e.clientX, e.clientY); }, { passive: false });
+      document.addEventListener('touchmove', function (e) { var r = R(); if (!r) return; if (r.active()) { var t = e.touches[0]; if (t) { e.preventDefault(); r.move(t.clientX, t.clientY); } } else { var t2 = e.touches[0]; if (t2) r.moveWait(t2.clientX, t2.clientY); } }, { passive: false });
       document.addEventListener('pointerup', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
       document.addEventListener('touchend', function () { var r = R(); if (r) { r.cancel(); r.end(); } });
     }
