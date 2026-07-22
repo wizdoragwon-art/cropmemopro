@@ -361,7 +361,7 @@
     var all = await obsAll(), dirty = all.filter(function (r) { return r.dirty; });
     var g = curGen(), batch = [];
     g.lines.forEach(function (l) {
-      batch.push({ table: 'line', key: g.id + '|' + l.id, data: { projId: g.id, genId: g.id, label: l.label, zone: l.zone, row: l.row, col: l.col, rep: l.rep, block: l.block, indivTotal: l.indivTotal, selected: !!l.selected }, updatedAt: Date.now() });
+      batch.push({ table: 'line', key: g.id + '|' + l.id, data: { projId: g.id, genId: g.id, label: l.label, pedigree: l.pedigree || '', zone: l.zone, row: l.row, col: l.col, rep: l.rep, block: l.block, indivTotal: l.indivTotal, selected: !!l.selected }, updatedAt: Date.now() });
     });
     dirty.forEach(function (r) {
       batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (recSeries(r) && r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
@@ -436,11 +436,11 @@
       if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
       return String(a.traitId) < String(b.traitId) ? -1 : 1;
     });
-    var rows = [['No.', '라벨번호', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '개체 선발', '조합, 계통 선발']];
+    var rows = [['No.', '라벨번호', '품종명/Pedigree', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '개체 선발', '조합, 계통 선발']];
     recs.forEach(function (r, i) {
       var g = genOf[r.genId], l = lineById[r.genId + '|' + r.lineId] || {}, t = traitOfGen(g, r.traitId);
       var val = (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value;
-      rows.push([i + 1, l.label || r.lineId, l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
+      rows.push([i + 1, l.label || r.lineId, l.pedigree || '', l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
     });
     var csv = rows.map(function (row) { return row.map(function (c) { c = (c == null ? '' : String(c)); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
     var used = [];
@@ -607,20 +607,20 @@
         var prev = w.rows.slice(0, 8);
         bodyHtml = '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">' + esc(w.fileName) + ' · <b style="color:var(--text-primary)">' + w.rows.length + '개</b> 라벨 인식' + (w.rows.length > 8 ? ' (앞 8개)' : '') + '</div>' +
           (w.fromOCR ? '<div style="font-size:11px;color:#8A5A12;background:#FAEEDA;border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.5">' + ico('info-circle', '#B0721A', 12) + ' 사진·스캔에서 인식한 결과입니다. 라벨이 맞는지 확인하세요(0↔O, 1↔I 혼동 주의). 등록 후 과제 수정 화면에서 고칠 수 있습니다.</div>' : '') +
-          '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:6px 9px">#</th><th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:center;padding:6px 9px">세대</th><th style="text-align:center;padding:6px 9px">반복</th><th style="text-align:center;padding:6px 9px">개체</th></tr></thead><tbody>' +
-          prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:5px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:5px 9px;text-align:center">' + esc(r.gen || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+          '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:6px 9px">#</th><th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:left;padding:6px 9px">품종명/Pedigree</th><th style="text-align:center;padding:6px 9px">세대</th><th style="text-align:center;padding:6px 9px">반복</th><th style="text-align:center;padding:6px 9px">개체</th></tr></thead><tbody>' +
+          prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:5px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:5px 9px;color:var(--text-secondary)">' + esc(r.pedigree || '-') + '</td><td style="padding:5px 9px;text-align:center">' + esc(r.gen || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wFileReset" style="flex:0 0 100px;height:40px;font-size:13px">다시 선택</button><div style="flex:1;display:flex;align-items:center;font-size:11px;color:var(--text-muted)">세대 열이 없으면 아래 세대로 등록됩니다</div></div>' +
           (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') + '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div></div>') +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">개체 수가 없는 행은 <b>' + w.indiv + '</b>개로 등록됩니다. <input class="ein" id="wIndiv" type="number" style="width:70px;height:32px;display:inline-block;vertical-align:middle;margin-left:4px" value="' + w.indiv + '"></div>';
       } else {
-        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
-          '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,세대,반복,개체수\n' + esc(w.prefix || yy()) + '-0001,F3,1,10\n' + esc(w.prefix || yy()) + '-0002,F3,2,10</div></div>' +
+        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
+          '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,품종명/Pedigree,세대,반복,개체수\n' + esc(w.prefix || yy()) + '-0001,금강/IT12345,F3,1,10\n' + esc(w.prefix || yy()) + '-0002,새금강/IT12346,F3,2,10</div></div>' +
           '<button class="btn" id="wTpl" style="width:100%;height:44px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
           '<button class="btn primary" id="wPick" style="width:100%;height:50px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
           '<button class="btn" id="wShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +
           '<input type="file" id="wFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" style="display:none">' +
           '<input type="file" id="wCam" accept="image/*" capture="environment" style="display:none">' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">엑셀·CSV가 가장 정확합니다. 종이 표를 촬영하거나 PDF를 넣으면 <b>한글 머리글(라벨번호·세대·반복·개체수)</b>을 읽어 열을 맞춰 채웁니다(인쇄된 표 기준). 인식 결과는 미리보기에서 확인한 뒤 등록하고, 과제 수정 화면에서 고칠 수 있습니다.</div>';
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">엑셀·CSV가 가장 정확합니다. 종이 표를 촬영하거나 PDF를 넣으면 <b>한글 머리글(라벨번호·품종명/Pedigree·세대·반복·개체수)</b>을 읽어 열을 맞춰 채웁니다(인쇄된 표 기준). 인식 결과는 미리보기에서 확인한 뒤 등록하고, 과제 수정 화면에서 고칠 수 있습니다.</div>';
       }
     }
     return tabs + bodyHtml +
@@ -713,7 +713,7 @@
       $('wRcbd').onclick = function () { w.rcbd = !w.rcbd; renderNew(); };
       document.querySelectorAll('.wrep').forEach(function (b) { b.onclick = function () { w.reps = parseInt(b.getAttribute('data-n')); renderNew(); }; });
       if ($('wFileReset')) $('wFileReset').onclick = function () { w.rows = null; w.fileName = ''; renderNew(); };
-      if ($('wTpl')) $('wTpl').onclick = function () { var pf = w.prefix || yy(); var csv = '라벨번호,세대,반복,개체수\r\n' + pf + '-0001,F3,1,10\r\n' + pf + '-0002,F3,2,10\r\n' + pf + '-0003,F3,3,10\r\n'; downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv'); toast('빈 양식 CSV 내려받음'); };
+      if ($('wTpl')) $('wTpl').onclick = function () { var pf = w.prefix || yy(); var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' + pf + '-0001,금강/IT12345,F3,1,10\r\n' + pf + '-0002,새금강/IT12346,F3,2,10\r\n' + pf + '-0003,조경/IT12347,F3,3,10\r\n'; downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv'); toast('빈 양식 CSV 내려받음'); };
       if ($('wPick')) $('wPick').onclick = function () { $('wFile').click(); };
       if ($('wShot')) $('wShot').onclick = function () { $('wCam').click(); };
       if ($('wCam')) $('wCam').onchange = function () {
@@ -759,10 +759,10 @@
         var src = byFileGen ? w.rows.filter(function (r) { return r.gen === gl; }) : w.rows;
         src.forEach(function (r, i) {
           if (r.rep) { // 파일에 반복이 지정된 행은 그대로
-            lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: r.label, rep: r.rep, block: w.rcbd ? ('B-' + r.rep) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
+            lines.push({ id: 'L' + String(i + 1).padStart(3, '0'), label: r.label, pedigree: r.pedigree || '', rep: r.rep, block: w.rcbd ? ('B-' + r.rep) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
           } else { // 반복이 없으면 같은 라벨을 반복 수만큼 생성
             for (var rp = 1; rp <= reps; rp++) {
-              lines.push({ id: 'L' + String(i + 1).padStart(3, '0') + '_R' + rp, label: r.label, rep: rp, block: w.rcbd ? ('B-' + rp) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
+              lines.push({ id: 'L' + String(i + 1).padStart(3, '0') + '_R' + rp, label: r.label, pedigree: r.pedigree || '', rep: rp, block: w.rcbd ? ('B-' + rp) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: r.indiv || w.indiv, selected: false });
             }
           }
         });
@@ -954,6 +954,7 @@
       return '<tr style="border-top:0.5px solid var(--border)">' +
         '<td style="padding:3px 4px;color:var(--text-muted);font-size:11px;text-align:center">' + (li + 1) + '</td>' +
         '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="label" value="' + esc(l.label) + '" style="width:100%;min-width:96px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 7px;background:var(--surface-2);color:var(--text-primary)"></td>' +
+        '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="pedigree" value="' + esc(l.pedigree || '') + '" placeholder="품종명/Pedigree" style="width:100%;min-width:110px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 7px;background:var(--surface-2);color:var(--text-primary)"></td>' +
         '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="gen" value="' + esc(l.gen || g.label || '') + '" style="width:58px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 6px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
         '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="rep" type="number" value="' + (l.rep || '') + '" style="width:50px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 4px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
         '<td style="padding:3px 4px"><input class="geL" data-i="' + li + '" data-f="indivTotal" type="number" value="' + (l.indivTotal || '') + '" style="width:52px;height:34px;font-size:13px;border:0.5px solid var(--border);border-radius:6px;padding:0 4px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
@@ -983,7 +984,7 @@
         // lines table
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">등록 조합·계통 <b style="color:var(--text-primary)">' + g.lines.length + '</b></span><button class="btn" id="geBulk" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('table', 'var(--text-primary)', 14) + ' 일괄등록</button></div>' +
         '<div style="max-height:300px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
-          '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1"><th style="font-size:11px;padding:6px 4px;width:26px">#</th><th style="font-size:11px;padding:6px 4px;text-align:left">라벨번호</th><th style="font-size:11px;padding:6px 4px">세대</th><th style="font-size:11px;padding:6px 4px">반복</th><th style="font-size:11px;padding:6px 4px">개체수</th><th style="width:34px"></th></tr></thead><tbody>' + rows + '</tbody></table>' +
+          '<table style="width:100%;border-collapse:collapse"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1"><th style="font-size:11px;padding:6px 4px;width:26px">#</th><th style="font-size:11px;padding:6px 4px;text-align:left">라벨번호</th><th style="font-size:11px;padding:6px 4px;text-align:left">품종명/Pedigree</th><th style="font-size:11px;padding:6px 4px">세대</th><th style="font-size:11px;padding:6px 4px">반복</th><th style="font-size:11px;padding:6px 4px">개체수</th><th style="width:34px"></th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
         '<button class="btn" id="geLadd" style="width:100%;height:40px;font-size:13px;margin-top:8px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 계통 추가</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">표에서 직접 수정할 수 있습니다. 세대를 다르게 적으면 저장 시 해당 세대 과제로 분리됩니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
@@ -996,6 +997,7 @@
       v.querySelectorAll('.geL').forEach(function (inp) {
         var li = +inp.getAttribute('data-i'), f = inp.getAttribute('data-f'), l = g.lines[li]; if (!l) return;
         if (f === 'label') l.label = inp.value.trim() || l.label;
+        else if (f === 'pedigree') l.pedigree = inp.value.trim();
         else if (f === 'gen') l.gen = inp.value.trim();
         else if (f === 'rep') { var r = parseInt(inp.value); l.rep = r > 0 ? r : 1; l.block = 'B-' + l.rep; }
         else if (f === 'indivTotal') { var n = parseInt(inp.value); l.indivTotal = n > 0 ? n : 1; }
@@ -1017,7 +1019,7 @@
       pj.items.forEach(function (it) { if (it.g.id !== g.id) it.g.traits = JSON.parse(JSON.stringify(g.traits)); });
       kvSet('gens', S.gens).then(function () { toast('모든 세대에 적용됨'); });
     };
-    $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
+    $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), pedigree: '', gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
     v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } if (!confirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.')) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }; });
     S._geSave = function () {
       collect();
@@ -1255,7 +1257,7 @@
     $('qDraw').onclick = function () { openDraw(); };
     $('qVoice').onclick = function () { S.voice = { transcript: '', parsed: [], listening: false }; go('voice'); };
     updatePhotoBadge();
-    if (!S.showMap) $('cMapWrap').classList.add('hidden');
+    $('cMapWrap').classList.toggle('hidden', !S.showMap);
     // swipe — 좌우: 개체 이동 · 상하: 라벨번호(계통) 이동
     attachSwipe($('cInput'), moveIndiv, moveLine);
     attachSwipe($('cCard'), moveIndiv, moveLine);
@@ -1350,6 +1352,7 @@
         '<span style="font-size:10px;color:var(--text-muted)">' + ico('pencil', 'var(--text-muted)', 12) + ' 정보수정</span>' +
         '<button class="btn" id="cScan" style="padding:2px 7px;font-size:10px;display:inline-flex;align-items:center;gap:3px">' + ico('camera', 'var(--text-primary)', 12) + ' 스캔</button>' +
       '</div>' +
+      (l.pedigree ? '<div style="font-size:13px;color:#3B6D11;font-weight:600;margin-top:3px">' + ico('seeding', '#639922', 13) + ' ' + esc(l.pedigree) + '</div>' : '') +
       '<div style="font-size:15px;color:var(--text-secondary);margin-top:3px">개체 <b style="color:#27500A">' + S.indiv + '</b>/' + l.indivTotal + ' · ' + esc(l.zone) + ' · ' + l.row + '행 ' + l.col + '열 · 반복 ' + l.rep + '</div></div>' +
       '<div style="display:flex;gap:8px;flex:0 0 auto">' +
         '<button class="btn" id="cIsel" style="width:46px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:1px' + (isel ? ';background:#EAF3DE;border-color:#639922' : '') + '"><i class="ti ' + (isel ? 'ti-star-filled' : 'ti-star') + '" style="font-size:20px;color:' + (isel ? '#639922' : 'var(--text-muted)') + '"></i><span style="font-size:8px;color:' + (isel ? '#3B6D11' : 'var(--text-muted)') + '">선발</span></button>' +
@@ -1365,6 +1368,7 @@
     var l = curLine();
     var nl = prompt('라벨번호', l.label); if (nl == null) return;
     l.label = nl.trim() || l.label;
+    var np = prompt('품종명/Pedigree', l.pedigree || ''); if (np != null) l.pedigree = np.trim();
     var ni = prompt('개체 수', l.indivTotal); if (ni != null && parseInt(ni) > 0) { l.indivTotal = parseInt(ni); if (S.indiv > l.indivTotal) S.indiv = l.indivTotal; }
     var nr = prompt('반복(rep)', l.rep); if (nr != null && parseInt(nr) > 0) l.rep = parseInt(nr);
     kvSet('gens', S.gens); renderCollect(); toast('저장됨');
@@ -2367,11 +2371,11 @@
     rows = (rows || []).filter(function (r) { return r && r.some(function (c) { return String(c == null ? '' : c).trim() !== ''; }); });
     if (!rows.length) return [];
     var header = rows[0].map(function (s) { return String(s == null ? '' : s).trim(); });
-    var hasHeader = header.some(function (h) { return /라벨|label|반복|rep|개체|indiv|세대|gen/i.test(h); });
-    var li = 0, ri = -1, ii = -1, gi = -1, start = 0;
-    if (hasHeader) { start = 1; header.forEach(function (h, idx) { if (/라벨|label/i.test(h) && li === 0) li = idx; if (/반복|rep|block/i.test(h)) ri = idx; if (/개체|indiv/i.test(h)) ii = idx; if (/세대|generation|^gen$/i.test(h)) gi = idx; }); }
+    var hasHeader = header.some(function (h) { return /라벨|label|반복|rep|개체|indiv|세대|gen|품종|품명|pedigree|variety/i.test(h); });
+    var li = 0, ri = -1, ii = -1, gi = -1, pi = -1, start = 0;
+    if (hasHeader) { start = 1; header.forEach(function (h, idx) { if (/품종|품명|pedigree|variety/i.test(h) && pi < 0) pi = idx; else if (/라벨|label/i.test(h) && li === 0) li = idx; if (/반복|rep|block/i.test(h)) ri = idx; if (/개체|indiv/i.test(h)) ii = idx; if (/세대|generation|^gen$/i.test(h)) gi = idx; }); }
     var out = [];
-    for (var r = start; r < rows.length; r++) { var row = rows[r]; var label = String(row[li] == null ? '' : row[li]).trim(); if (!label) continue; var rec = { label: label }; if (ri >= 0 && row[ri] != null && String(row[ri]).trim() !== '') rec.rep = parseInt(row[ri]) || null; if (ii >= 0 && row[ii] != null && String(row[ii]).trim() !== '') rec.indiv = parseInt(row[ii]) || null; if (gi >= 0 && row[gi] != null && String(row[gi]).trim() !== '') rec.gen = String(row[gi]).trim(); out.push(rec); }
+    for (var r = start; r < rows.length; r++) { var row = rows[r]; var label = String(row[li] == null ? '' : row[li]).trim(); if (!label) continue; var rec = { label: label }; if (pi >= 0 && row[pi] != null && String(row[pi]).trim() !== '') rec.pedigree = String(row[pi]).trim(); if (ri >= 0 && row[ri] != null && String(row[ri]).trim() !== '') rec.rep = parseInt(row[ri]) || null; if (ii >= 0 && row[ii] != null && String(row[ii]).trim() !== '') rec.indiv = parseInt(row[ii]) || null; if (gi >= 0 && row[gi] != null && String(row[gi]).trim() !== '') rec.gen = String(row[gi]).trim(); out.push(rec); }
     return out;
   }
   function looksBinary(txt) {
@@ -2506,6 +2510,7 @@
   }
   // Header keyword sets (Korean + English)
   var HDR = {
+    pedigree: /품종|품명|pedigree|variety/i,
     label: /라벨|라밸|번호|계통|조합|label|line|code|no\.?$/i,
     gen: /세대|세[대다]|gen|generation/i,
     rep: /반복|블[록럭]|rep|block/i,
@@ -2517,7 +2522,7 @@
       ws.forEach(function (wd) {
         var t = wd.text.replace(/[^0-9A-Za-z가-힣.]/g, '');
         if (!t) return;
-        ['label', 'gen', 'rep', 'indiv'].forEach(function (k) {
+        ['pedigree', 'label', 'gen', 'rep', 'indiv'].forEach(function (k) {
           if (cols[k] == null && HDR[k].test(t)) { cols[k] = (wd.x0 + wd.x1) / 2; hits++; }
         });
       });
@@ -2537,6 +2542,7 @@
         if (!best) return;
         var t = wd.text.trim();
         if (best === 'label') rec.label = (rec.label ? rec.label + t : t);
+        else if (best === 'pedigree') rec.pedigree = (rec.pedigree ? rec.pedigree + ' ' + t : t);
         else if (best === 'gen') rec.gen = t.toUpperCase();
         else { var n = parseInt(t.replace(/[^0-9]/g, ''), 10); if (!isNaN(n)) rec[best] = n; }
       });
@@ -2592,7 +2598,7 @@
     var g = S.gens[S.bulkIdx] || S.gens[0];
     var pf = (g && /^\d{2}$/.test(String(g.prefix || '')) ? g.prefix : yy());
     var gl = (g && g.label) || 'F3';
-    var csv = '라벨번호,세대,반복,개체수\r\n' + pf + '-0001,' + gl + ',1,10\r\n' + pf + '-0002,' + gl + ',2,10\r\n' + pf + '-0003,' + gl + ',3,10\r\n';
+    var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' + pf + '-0001,금강/IT12345,' + gl + ',1,10\r\n' + pf + '-0002,새금강/IT12346,' + gl + ',2,10\r\n' + pf + '-0003,조경/IT12347,' + gl + ',3,10\r\n';
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv');
     toast('빈 양식 CSV 내려받음');
   }
@@ -2601,8 +2607,8 @@
     var base = Date.now();
     rows.forEach(function (rec, i) {
       var l = g.lines[i];
-      if (l) { l.label = rec.label; if (rec.rep) { l.rep = rec.rep; l.block = 'B-' + rec.rep; } if (rec.indiv) l.indivTotal = rec.indiv; if (rec.gen) l.gen = rec.gen; }
-      else { var rep = rec.rep || ((i % 3) + 1); g.lines.push({ id: 'L' + base + '_' + i, label: rec.label, gen: rec.gen || undefined, rep: rep, block: 'B-' + rep, zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: rec.indiv || (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); }
+      if (l) { l.label = rec.label; if (rec.pedigree != null) l.pedigree = rec.pedigree; if (rec.rep) { l.rep = rec.rep; l.block = 'B-' + rec.rep; } if (rec.indiv) l.indivTotal = rec.indiv; if (rec.gen) l.gen = rec.gen; }
+      else { var rep = rec.rep || ((i % 3) + 1); g.lines.push({ id: 'L' + base + '_' + i, label: rec.label, pedigree: rec.pedigree || '', gen: rec.gen || undefined, rep: rep, block: 'B-' + rep, zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor(i / 10) + 1, col: (i % 10) + 1, indivTotal: rec.indiv || (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); }
     });
     kvSet('gens', S.gens).then(function () { toast(rows.length + '개 라벨 등록됨'); S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; S.editIdx = S.bulkIdx; go('genedit'); });
   }
@@ -2612,16 +2618,16 @@
     var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="bBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">라벨 일괄등록</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · 계통 ' + g.lines.length + '</div></div></div>';
     if (S.bulkStage === 'parsed' && S.bulkRows) {
       var rows = S.bulkRows, prev = rows.slice(0, 20);
-      var table = '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:7px 9px">#</th><th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 9px">세대</th><th style="text-align:center;padding:7px 9px">반복</th><th style="text-align:center;padding:7px 9px">개체수</th></tr></thead><tbody>' +
-        prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:6px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:6px 9px;text-align:center">' + esc(r.gen || g.label) + '</td><td style="padding:6px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:6px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      var table = '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:7px 9px">#</th><th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:left;padding:7px 9px">품종명/Pedigree</th><th style="text-align:center;padding:7px 9px">세대</th><th style="text-align:center;padding:7px 9px">반복</th><th style="text-align:center;padding:7px 9px">개체수</th></tr></thead><tbody>' +
+        prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:6px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:6px 9px;color:var(--text-secondary)">' + esc(r.pedigree || '-') + '</td><td style="padding:6px 9px;text-align:center">' + esc(r.gen || g.label) + '</td><td style="padding:6px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:6px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>';
       v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">' + esc(S.bulkFileName) + ' · <b style="color:var(--text-primary)">' + rows.length + '개</b> 라벨 인식' + (rows.length > 20 ? ' (앞 20개 미리보기)' : '') + '</div>' + table +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">순서대로 기존 계통에 라벨이 채워지고, 초과분은 계통으로 추가됩니다. 반복·개체수가 있으면 함께 반영됩니다. 기존 수집값은 유지됩니다.</div></div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">순서대로 기존 계통에 라벨이 채워지고, 초과분은 계통으로 추가됩니다. 품종명/Pedigree·반복·개체수가 있으면 함께 반영됩니다. 기존 수집값은 유지됩니다.</div></div>' +
         '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><div style="display:flex;gap:10px"><button class="btn" id="bReset" style="flex:0 0 100px;height:48px;font-size:14px">다시 선택</button><button class="btn primary" id="bApply" style="flex:1;height:48px;font-size:15px">' + esc(g.label) + ' 세대에 ' + rows.length + '개 등록</button></div></div>';
       $('bReset').onclick = function () { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); };
       $('bApply').onclick = applyBulk;
     } else {
-      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>세대·반복·개체수</b>는 선택입니다.</div>' +
-        '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,세대,반복,개체수\n' + esc(bulkPrefix(g)) + '-0001,' + esc(g.label) + ',1,10\n' + esc(bulkPrefix(g)) + '-0002,' + esc(g.label) + ',2,10</div></div>' +
+      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
+        '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,품종명/Pedigree,세대,반복,개체수\n' + esc(bulkPrefix(g)) + '-0001,금강/IT12345,' + esc(g.label) + ',1,10\n' + esc(bulkPrefix(g)) + '-0002,새금강/IT12346,' + esc(g.label) + ',2,10</div></div>' +
         '<button class="btn" id="bTpl" style="width:100%;height:46px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
         '<button class="btn primary" id="bPick" style="width:100%;height:52px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
         '<button class="btn" id="bShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +

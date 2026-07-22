@@ -24,7 +24,7 @@
  *       "data":{"projId":"P001","label":"F3","stage":"조사"},
  *       "updatedAt": 1720500000000 },
  *     { "table":"line",        "key":"P001|G01|L001",
- *       "data":{"projId":"P001","genId":"G01","label":"TM24-025","zone":"A동",
+ *       "data":{"projId":"P001","genId":"G01","label":"TM24-025","pedigree":"금강/IT12345","zone":"A동",
  *               "row":3,"col":5,"rep":2,"block":"B-3","indivTotal":10,"selected":false},
  *       "updatedAt": 1720500000000 },
  *     { "table":"observation", "key":"P001|G01|L001|5|t_dis",
@@ -50,7 +50,7 @@ var SYNC_TOKEN = '';   // 공유 비밀키. 비워두면 검사 안 함. 운영 
 var SHEETS = {
   project:    ['key','name','crop','goal','status','updatedAt','deleted'],
   generation: ['key','projId','label','stage','updatedAt','deleted'],
-  line:       ['key','projId','genId','label','zone','row','col','rep','block','indivTotal','selected','updatedAt','deleted'],
+  line:       ['key','projId','genId','label','zone','row','col','rep','block','indivTotal','selected','updatedAt','deleted','pedigree'],
   trait:      ['key','genId','name','type','unit','scale','updatedAt','deleted'],
   observation:['key','projId','genId','lineId','indiv','traitId','value','updatedAt','deleted']
 };
@@ -63,6 +63,13 @@ function setup() {
     if (sh.getLastRow() === 0) {
       sh.getRange(1,1,1,SHEETS[name].length).setValues([SHEETS[name]]);
       sh.setFrozenRows(1);
+    } else {
+      // 기존 시트: 새로 추가된 열(예: pedigree) 머리글을 끝에 보강(데이터는 그대로)
+      var hdr = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
+      if (hdr.length < SHEETS[name].length) {
+        sh.getRange(1,1,1,SHEETS[name].length).setValues([SHEETS[name]]);
+        sh.setFrozenRows(1);
+      }
     }
   });
   // 기본 'Sheet1' 정리(비어 있으면)
@@ -187,19 +194,19 @@ function csv_(genId, shape) {
 
   // lineId -> {label, rep, indivTotal}
   var lmap = {};
-  var lKey=lineCols.indexOf('key'), lLbl=lineCols.indexOf('label'), lRep=lineCols.indexOf('rep'), lGen=lineCols.indexOf('genId');
-  lines.forEach(function(r){ lmap[String(r[lKey])] = {label:r[lLbl], rep:r[lRep], genId:r[lGen]}; });
+  var lKey=lineCols.indexOf('key'), lLbl=lineCols.indexOf('label'), lRep=lineCols.indexOf('rep'), lGen=lineCols.indexOf('genId'), lPed=lineCols.indexOf('pedigree');
+  lines.forEach(function(r){ lmap[String(r[lKey])] = {label:r[lLbl], rep:r[lRep], genId:r[lGen], pedigree:(lPed>=0?r[lPed]:'')}; });
 
   var oGen=obsCols.indexOf('genId'), oLine=obsCols.indexOf('lineId'), oInd=obsCols.indexOf('indiv'),
       oTr=obsCols.indexOf('traitId'), oVal=obsCols.indexOf('value'), oDel=obsCols.indexOf('deleted'),
       oProj=obsCols.indexOf('projId');
 
-  var rows = [['라벨번호','세대','반복','개체','형질','값']];
+  var rows = [['라벨번호','품종명/Pedigree','세대','반복','개체','형질','값']];
   obs.forEach(function(r){
     if (r[oDel]) return;
     if (genId && String(r[oGen]) !== String(genId)) return;
     var lid = String(r[oLine]); var lk = lmap[lid] || {};
-    rows.push([ lk.label || lid, findGenLabel_(r[oGen]), lk.rep || '', r[oInd], r[oTr], r[oVal] ]);
+    rows.push([ lk.label || lid, lk.pedigree || '', findGenLabel_(r[oGen]), lk.rep || '', r[oInd], r[oTr], r[oVal] ]);
   });
 
   var csv = rows.map(function(row){
