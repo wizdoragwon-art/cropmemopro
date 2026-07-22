@@ -1263,7 +1263,9 @@
           '<button class="btn" id="cPrev" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">' + ico('chevron-left', 'var(--text-primary)', 16) + ' 이전 라벨번호</button>' +
           '<button class="btn" id="cNext" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:4px">다음 라벨번호 ' + ico('chevron-right', 'var(--text-primary)', 16) + '</button>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+      // 하단 빈 공간 채우기 — 이 영역에서도 스와이프로 개체/라벨번호 이동
+      '<div id="cFill"></div>';
     v.className = 'view on' + (S.showMap ? ' mapOn' : '');
     renderCard(); renderDate(); renderPills(); renderInput(); renderHist(); renderMap(); renderGenBar();
     $('cNum').textContent = '개체 ' + S.indiv + '/' + total();
@@ -1282,6 +1284,7 @@
     attachSwipe($('cHist'), moveIndiv, moveLine);
     attachSwipe($('cQuick'), moveIndiv, moveLine);
     attachSwipe($('cNav'), moveIndiv, moveLine);
+    attachSwipe($('cFill'), moveIndiv, moveLine);
   }
   function refreshCollect() {
     if (S.view !== 'collect' || S.traitEdit) return;
