@@ -2943,38 +2943,62 @@
   }
   function renderVoice() {
     var l = curLine(), v = $('view-voice'), vo = S.voice || (S.voice = { transcript: '', parsed: [], listening: false });
+    // 안드로이드 WebView(설치형 앱)에는 웹 표준 SpeechRecognition이 없음 → 키보드 마이크(음성 입력) 방식으로 보완
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition, supported = !!SR;
-    var parsedHtml = (vo.parsed && vo.parsed.length) ? ('<div style="font-size:12px;font-weight:600;margin:14px 0 8px">인식된 형질 값</div>' + vo.parsed.map(function (pp, i) { return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-size:13px"><b>' + esc(pp.name) + '</b> → ' + esc(pp.value) + '</div><button class="btn vApply" data-i="' + i + '" style="height:34px;padding:0 12px;font-size:12px">적용</button></div>'; }).join('')) : '';
+    function parsedListHtml() {
+      if (!(vo.parsed && vo.parsed.length)) return '<div style="font-size:12px;color:var(--text-muted);padding:6px 2px">형질 이름과 값을 말하거나 입력하면 여기에 인식된 값이 표시됩니다. 예: “병징 5 발병면적률 30 마디수 12”</div>';
+      return vo.parsed.map(function (pp, i) { return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-size:13px"><b>' + esc(pp.name) + '</b> → ' + esc(String(pp.value)) + '</div><button class="btn vApply" data-i="' + i + '" style="height:34px;padding:0 12px;font-size:12px">적용</button></div>'; }).join('') +
+        '<button class="btn primary" id="voApplyAll" style="width:100%;height:42px;font-size:13px;margin-top:4px">인식된 ' + vo.parsed.length + '개 값 전체 적용</button>';
+    }
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="voBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">음성 입력</div><div style="font-size:11px;color:var(--text-muted)">' + esc(l.label) + ' · 개체 ' + S.indiv + '</div></div></div>' +
       '<div style="flex:1;padding:16px 16px;overflow:auto">' +
-      (supported ? (
-        '<div style="text-align:center;padding:10px 0"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:88px;height:88px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:#C0392B;border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', '#fff', 36) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:10px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div></div>' +
-        '<div class="card voT" style="margin-top:14px;min-height:70px;font-size:14px;line-height:1.6">' + (vo.transcript ? esc(vo.transcript) : '<span style="color:var(--text-muted)">예: “병징 5 발병면적률 30 마디수 12”처럼 형질 이름과 값을 말하면 자동 인식됩니다.</span>') + '</div>' +
-        parsedHtml +
-        (vo.transcript ? '<button class="btn" id="voNote" style="width:100%;height:44px;font-size:13px;margin-top:12px">비고에 문장 저장</button>' : '')
-      ) : (
-        '<div class="card" style="line-height:1.7;font-size:13px;color:var(--text-secondary)">이 브라우저는 음성 인식을 지원하지 않습니다(아이폰·아이패드 Safari 미지원). 안드로이드 Chrome에서 쓰거나, 아래에 직접 입력해 비고로 저장하세요.</div>' +
-        '<textarea class="ein" id="voManual" style="height:100px;margin-top:12px;padding:10px 12px;resize:none" placeholder="관찰 메모"></textarea>' +
-        '<button class="btn primary" id="voManualSave" style="width:100%;height:46px;font-size:14px;margin-top:10px">비고에 저장</button>'
-      )) +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">음성 인식은 보통 인터넷 연결이 필요합니다(브라우저가 처리). 결과는 반드시 확인 후 적용하세요.</div></div>';
+      // 1) 웹 음성인식이 되는 환경(크롬 등)에서는 마이크 버튼 제공
+      (supported ?
+        '<div style="text-align:center;padding:4px 0 8px"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:#C0392B;border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', '#fff', 34) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div></div>'
+        : '<div class="card" style="line-height:1.7;font-size:13px;color:var(--text-secondary)">' + ico('microphone', '#3B6D11', 15) + ' 이 앱에서는 웹 음성인식을 쓸 수 없어, <b>키보드의 마이크 버튼</b>으로 음성 입력합니다.<br><span style="color:var(--text-muted)">아래 칸을 누르면 키보드가 뜹니다 → 키보드의 <b>🎤 마이크</b>를 눌러 말하면 글자로 입력됩니다.</span></div>') +
+      // 2) 키보드 마이크/직접 입력 칸 — 모든 환경 공통, 말한 내용이 그대로 파싱됨
+      '<div style="font-size:12px;font-weight:600;margin:14px 0 6px">' + (supported ? '또는 키보드 마이크로 입력' : '음성·직접 입력') + '</div>' +
+      '<textarea class="ein" id="voManual" style="height:84px;padding:10px 12px;resize:none;font-size:15px;line-height:1.5" placeholder="예: 병징 5 발병면적률 30 마디수 12">' + esc(vo.transcript || '') + '</textarea>' +
+      // 3) 인식 결과 · 적용
+      '<div style="font-size:12px;font-weight:600;margin:14px 0 8px">인식된 형질 값</div>' +
+      '<div id="voParsed">' + parsedListHtml() + '</div>' +
+      '<button class="btn" id="voNote" style="width:100%;height:44px;font-size:13px;margin-top:12px">문장 전체를 비고에 저장</button>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">키보드 음성 입력은 인터넷 없이도 동작할 수 있습니다(안드로이드 음성 언어팩 설치 시). 인식된 값은 반드시 확인 후 적용하세요.</div></div>';
+
+    function refreshParsed() { var box = $('voParsed'); if (box) { box.innerHTML = parsedListHtml(); wireParsed(); } }
+    function wireParsed() {
+      v.querySelectorAll('.vApply').forEach(function (b) { b.onclick = function () { var pp = vo.parsed[+b.getAttribute('data-i')]; if (!pp) return; setVal(pp.traitId, pp.value).then(function () { toast(pp.name + ' = ' + pp.value + ' 적용'); }); }; });
+      if ($('voApplyAll')) $('voApplyAll').onclick = function () {
+        var list = (vo.parsed || []).slice(); if (!list.length) return;
+        var seq = Promise.resolve(); list.forEach(function (pp) { seq = seq.then(function () { return setVal(pp.traitId, pp.value); }); });
+        seq.then(function () { toast(list.length + '개 형질값 적용됨'); renderCard(); renderPills(); renderMap(); });
+      };
+    }
+
     $('voBack').onclick = function () { if (vo._rec) { try { vo._rec.stop(); } catch (e) {} } go('collect'); };
+
+    // 텍스트(키보드 마이크 포함) 입력 → 실시간 파싱 (재렌더 없이 결과 칸만 갱신해 키보드/커서 유지)
+    var ta = $('voManual');
+    if (ta) {
+      ta.oninput = function () { vo.transcript = ta.value; vo.parsed = parseVoice(vo.transcript); refreshParsed(); };
+      if (!supported) { try { ta.focus(); } catch (e) {} }
+    }
+    wireParsed();
+
     if (supported) {
       $('voMic').onclick = function () {
         if (vo.listening) { if (vo._rec) { try { vo._rec.stop(); } catch (e) {} } return; }
         var rec = new SR(); vo._rec = rec; rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
         var finalT = '';
-        rec.onresult = function (e) { var interim = ''; for (var i = e.resultIndex; i < e.results.length; i++) { var r = e.results[i]; if (r.isFinal) finalT += r[0].transcript; else interim += r[0].transcript; } vo.transcript = (finalT + ' ' + interim).trim(); var c = v.querySelector('.voT'); if (c) c.textContent = vo.transcript; };
+        rec.onresult = function (e) { var interim = ''; for (var i = e.resultIndex; i < e.results.length; i++) { var r = e.results[i]; if (r.isFinal) finalT += r[0].transcript; else interim += r[0].transcript; } vo.transcript = (finalT + ' ' + interim).trim(); var t2 = $('voManual'); if (t2) t2.value = vo.transcript; };
         rec.onerror = function () { vo.listening = false; renderVoice(); };
         rec.onend = function () { vo.listening = false; vo.transcript = (finalT || vo.transcript || '').trim(); vo.parsed = parseVoice(vo.transcript); renderVoice(); };
         vo.listening = true; renderVoice(); try { rec.start(); } catch (e) { vo.listening = false; renderVoice(); }
       };
-      v.querySelectorAll('.vApply').forEach(function (b) { b.onclick = function () { var pp = vo.parsed[+b.getAttribute('data-i')]; if (!pp) return; setVal(pp.traitId, pp.value).then(function () { toast(pp.name + ' = ' + pp.value + ' 적용'); }); }; });
-      if ($('voNote')) $('voNote').onclick = function () { var nt = traitByName('비고'); if (!nt) { toast('비고 형질이 없습니다'); return; } setVal(nt.id, vo.transcript).then(function () { toast('비고 저장됨'); }); };
-    } else {
-      $('voManualSave').onclick = function () { var nt = traitByName('비고'); var txt = ($('voManual').value || '').trim(); if (!txt) { toast('내용을 입력하세요'); return; } if (!nt) { toast('비고 형질이 없습니다'); return; } setVal(nt.id, txt).then(function () { toast('비고 저장됨'); go('collect'); }); };
     }
+
+    $('voNote').onclick = function () { var nt = traitByName('비고'); var txt = (($('voManual') && $('voManual').value) || vo.transcript || '').trim(); if (!txt) { toast('내용을 입력하세요'); return; } if (!nt) { toast('비고 형질이 없습니다'); return; } setVal(nt.id, txt).then(function () { toast('비고 저장됨'); }); };
   }
 
   // ---------- EXPORT ----------
