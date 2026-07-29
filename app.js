@@ -430,6 +430,26 @@
     if (t.type === 'text') return '사용자 기입';
     return t.unit || '';
   }
+  // 야장 수집 화면에 표기할 단위 — 타입 기준으로 결정(수치형만 사용자 단위 사용)
+  // 비율=% · 카운터=개 · 등급·항목형·날짜형·문자형은 단위 표시 없음(이전에 저장된 수치형 단위가 남아있어도 무시)
+  function headUnit(t) {
+    if (!t) return '';
+    if (t.type === 'numeric') return t.unit || '';
+    if (t.type === 'ratio') return '%';
+    if (t.type === 'counter') return '개';
+    return '';
+  }
+  // 타입 변경 시 측정단위 정리 — 수치형 외의 타입에는 이전 수치형 단위가 남지 않도록 함
+  // 비율은 % 로 저장, 그 외 비수치형(등급·카운터·항목형·날짜형·문자형)은 단위 제거
+  // (반환값 유무로 데이터가 바뀌었는지 알려줘 마이그레이션에서 재사용)
+  function normalizeUnit(t) {
+    if (!t) return false;
+    if (t.type === 'ratio') { if (t.unit !== '%') { t.unit = '%'; return true; } return false; }
+    if (t.type === 'numeric') { if (t.unit === '%' || t.unit === '개') { t.unit = ''; return true; } return false; }
+    // rating · counter · categorical · date · text → 단위 없음
+    if (t.unit != null) { delete t.unit; return true; }
+    return false;
+  }
   function traitOfGen(g, id) { var ts = (g && g.traits) || []; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   // 과제(프로젝트) 전체 = 모든 세대를 한 파일로
   async function buildCSV(p) {
@@ -752,7 +772,7 @@
       if ($('wTReset')) $('wTReset').onclick = function () { keepScroll(); syncWT(); w.baseTraits = null; w.loadedFrom = null; w.traitOff = {}; renderNew(); toast('기본 형질세트로 되돌림'); };
       $('wTAdd').onclick = function () { keepScroll(); syncWT(); w.extraTraits = w.extraTraits || []; var nt = { name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); w.extraTraits.push(nt); renderNew(); };
       document.querySelectorAll('.wT-name').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value; }; });
-      document.querySelectorAll('.wT-type').forEach(function (sel) { sel.onchange = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = [1, 3, 5, 7, 9]; if (t.type === 'ratio' && !t.unit) t.unit = '%'; if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; if (t.type === 'numeric' && t.unit === '%') t.unit = ''; t.series = inferSeries(t); renderNew(); }; });
+      document.querySelectorAll('.wT-type').forEach(function (sel) { sel.onchange = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderNew(); }; });
       document.querySelectorAll('.wT-series').forEach(function (sw) { sw.onclick = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sw.getAttribute('data-i')]; t.series = !t.series; renderNew(); }; });
       document.querySelectorAll('.wT-del').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits.splice(+b.getAttribute('data-i'), 1); renderNew(); }; });
       document.querySelectorAll('.wT-uchip').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits[+b.getAttribute('data-i')].unit = b.getAttribute('data-u'); renderNew(); }; });
@@ -768,7 +788,7 @@
     var defs = wizBase(w).filter(function (t, i) { return !w.traitOff[i]; }).concat((w.extraTraits || []).filter(function (t) { return (t.name || '').trim(); }));
     var base = Date.now(), newGens = [], gls = wizGenList(w), byFileGen = wizFileGens(w).length > 0;
     gls.forEach(function (gl, gi) {
-      var traits = defs.map(function (t, ti) { var o = { id: 't' + (ti + 1), name: t.name, type: t.type }; if (t.unit) o.unit = t.unit; if (t.scale) o.scale = t.scale.slice(); if (t.options) o.options = t.options.slice(); o.series = inferSeries(o); return o; });
+      var traits = defs.map(function (t, ti) { var o = { id: 't' + (ti + 1), name: t.name, type: t.type }; if (t.unit) o.unit = t.unit; if (t.scale) o.scale = t.scale.slice(); if (t.options) o.options = t.options.slice(); if (o.type === 'rating') o.scale = withUnreadable(o.scale); o.series = inferSeries(o); return o; });
       var lines = [], reps = w.rcbd ? Math.max(1, w.reps) : 1;
       if (w.src === 'file' && w.rows && w.rows.length) {
         var src = byFileGen ? w.rows.filter(function (r) { return r.gen === gl; }) : w.rows;
@@ -1388,13 +1408,31 @@
   }
 
   function editLine() {
+    // 네이티브 prompt()는 설치형 PWA에서 간헐적으로 차단되어(대화상자 반복 차단) 팝업이 안 뜨는 문제가 있어
+    // 앱 자체 오버레이 폼으로 교체 — 항상 안정적으로 표시됨
     var l = curLine();
-    var nl = prompt('라벨번호', l.label); if (nl == null) return;
-    l.label = nl.trim() || l.label;
-    var np = prompt('품종명/Pedigree', l.pedigree || ''); if (np != null) l.pedigree = np.trim();
-    var ni = prompt('개체 수', l.indivTotal); if (ni != null && parseInt(ni) > 0) { l.indivTotal = parseInt(ni); if (S.indiv > l.indivTotal) S.indiv = l.indivTotal; }
-    var nr = prompt('반복(rep)', l.rep); if (nr != null && parseInt(nr) > 0) l.rep = parseInt(nr);
-    kvSet('gens', S.gens); renderCollect(); toast('저장됨');
+    var fld = function (id, label, val, extra) {
+      return '<div style="margin-top:10px"><label style="font-size:12px;color:var(--text-secondary);font-weight:500">' + label + '</label>' +
+        '<input class="ein" id="' + id + '" ' + (extra || '') + ' style="margin-top:5px;font-size:15px" value="' + esc(val == null ? '' : String(val)) + '"></div>';
+    };
+    openOverlay(
+      '<div class="ovl-title">' + ico('pencil', '#3B6D11', 18) + ' 라벨 정보 수정</div>' +
+      fld('elLabel', '라벨번호', l.label) +
+      fld('elPed', '품종명/Pedigree', l.pedigree || '') +
+      fld('elIndiv', '개체 수', l.indivTotal, 'type="number" inputmode="numeric" min="1"') +
+      fld('elRep', '반복(rep)', l.rep, 'type="number" inputmode="numeric" min="1"') +
+      '<div class="ovl-btns"><button class="btn" id="elCancel">취소</button><button class="btn primary" id="elOk">저장</button></div>'
+    );
+    var inp = $('elLabel'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('elCancel').onclick = function () { closeOverlay(); };
+    $('elOk').onclick = function () {
+      var nl = ($('elLabel').value || '').trim(); if (nl) l.label = nl;
+      l.pedigree = ($('elPed').value || '').trim();
+      var ni = parseInt($('elIndiv').value); if (ni > 0) { l.indivTotal = ni; if (S.indiv > l.indivTotal) S.indiv = l.indivTotal; }
+      var nr = parseInt($('elRep').value); if (nr > 0) { l.rep = nr; l.block = 'B-' + nr; }
+      closeOverlay();
+      kvSet('gens', S.gens); renderCollect(); toast('저장됨');
+    };
   }
 
   function renderDate() {
@@ -1521,7 +1559,8 @@
     var t = traitById(S.trait), area = $('cInput'); if (!area) return; area.innerHTML = '';
     var v = getValFor(t.id);
     var head = document.createElement('div'); head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px';
-    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (t.unit ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + t.unit + ')</span>' : '') + (t.series ? ' <span style="font-size:11px;color:#3B6D11">· ' + S.date + '</span>' : '') + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
+    var hu = headUnit(t);
+    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (hu ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + hu + ')</span>' : '') + (t.series ? ' <span style="font-size:11px;color:#3B6D11">· ' + S.date + '</span>' : '') + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
     area.appendChild(head);
 
     if (t.type === 'numeric' || t.type === 'counter' || t.type === 'ratio') {
@@ -1589,7 +1628,7 @@
     for (var iv = 1; iv <= l.indivTotal; iv++) { var val = S.vals[valKey(l.id, iv, t.id)]; if (val != null && val !== '' && !isNaN(parseFloat(val))) vals.push(parseFloat(val)); }
     if ((t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter') && vals.length) {
       var m = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
-      el.textContent = '계통 평균 ' + (Math.round(m * 10) / 10) + (t.unit || '') + ' (n=' + vals.length + ')';
+      el.textContent = '계통 평균 ' + (Math.round(m * 10) / 10) + headUnit(t) + ' (n=' + vals.length + ')';
     } else el.textContent = '';
   }
 
@@ -1601,7 +1640,24 @@
     h.innerHTML = '<div class="card" style="font-size:11px;color:var(--text-secondary)">' + ico('history', '#3B6D11', 12) + ' 이 개체 ' + esc(t.name) + ' 추이 · ' + parts.join(' → ') + '</div>';
   }
 
-  function parseScale(s) { var parts = String(s).split(/[\s,·]+/).filter(function (x) { return x !== ''; }); if (!parts.length) return [1, 3, 5, 7, 9]; var allNum = parts.every(function (x) { return /^-?\d+(\.\d+)?$/.test(x); }); return allNum ? parts.map(Number) : parts; }
+  var UNREADABLE = '판독불가';
+  // 모든 등급(rating) 척도에 '판독불가'를 마지막에 한 번만 추가한다.
+  // - 숫자 척도(1·3·5·7·9)든 문자 척도(R/IR/S)든, 기본값이든 사용자가 값을 바꾼 경우든 '판독불가'를 붙임
+  // - 이미 '판독불가'가 있으면 중복 없이 그대로 유지
+  // (rating 형질에만 호출되므로 무조건 추가해도 안전)
+  function withUnreadable(scale) {
+    scale = (scale && scale.length) ? scale.slice() : [1, 3, 5, 7, 9];
+    if (scale.some(function (x) { return String(x) === UNREADABLE; })) return scale;
+    scale.push(UNREADABLE);
+    return scale;
+  }
+  function parseScale(s) {
+    var parts = String(s).split(/[\s,·]+/).filter(function (x) { return x !== ''; });
+    if (!parts.length) return withUnreadable([1, 3, 5, 7, 9]);
+    // 토큰별로 숫자는 숫자로, 나머지(판독불가 등)는 문자로 보존 → 숫자 등급은 계속 평균 집계됨
+    var mapped = parts.map(function (x) { return /^-?\d+(\.\d+)?$/.test(x) ? Number(x) : x; });
+    return withUnreadable(mapped);
+  }
   function teConfig(t, i, px) {
     px = px || 'tE';
     if (t.type === 'numeric') {
@@ -1610,7 +1666,7 @@
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">측정 단위</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div><input class="ein ' + px + '-unit" data-i="' + i + '" placeholder="직접 입력 (예: mmol/L)" style="height:36px;margin-top:6px;font-size:13px" value="' + esc(t.unit || '') + '"></div>';
     }
     if (t.type === 'rating') {
-      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || [1, 3, 5, 7, 9]).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다.</div></div>';
+      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다. 등급에는 <b>판독불가</b>가 자동 포함됩니다.</div></div>';
     }
     if (t.type === 'categorical') {
       var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
@@ -1650,7 +1706,7 @@
     function done() { syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null; kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); }); }
     $('tEBack').onclick = done; $('tEDone').onclick = done;
     v.querySelectorAll('.tE-name').forEach(function (inp) { inp.onchange = function () { var t = g.traits[+inp.getAttribute('data-i')]; t.name = inp.value.trim() || t.name; }; });
-    v.querySelectorAll('.tE-type').forEach(function (sel) { sel.onchange = function () { syncTE(); var t = g.traits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = [1, 3, 5, 7, 9]; if (t.type === 'ratio' && !t.unit) t.unit = '%'; if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; if (t.type === 'numeric' && t.unit === '%') t.unit = ''; t.series = inferSeries(t); renderTraitEditor(); }; });
+    v.querySelectorAll('.tE-type').forEach(function (sel) { sel.onchange = function () { syncTE(); var t = g.traits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderTraitEditor(); }; });
     v.querySelectorAll('.tE-series').forEach(function (sw) { sw.onclick = function () { syncTE(); var t = g.traits[+sw.getAttribute('data-i')]; t.series = !t.series; renderTraitEditor(); }; });
     v.querySelectorAll('.tE-del').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (g.traits.length <= 1) { toast('형질은 최소 1개 필요합니다'); return; } if (!confirm('"' + g.traits[i].name + '" 형질을 삭제할까요?')) return; syncTE(); var tid = g.traits[i].id; g.traits.splice(i, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.traitId === tid) st.delete(r.k); }); }); renderTraitEditor(); }; });
     v.querySelectorAll('.tE-unit').forEach(function (inp) { inp.oninput = function () { g.traits[+inp.getAttribute('data-i')].unit = inp.value.trim(); }; });
@@ -3160,7 +3216,15 @@
       try { await odHandleRedirect(); } catch (e) {}
       var gens = await kvGet('gens'); if (!gens) { gens = seedGens(); await kvSet('gens', gens); }
       var mig = false;
-      gens.forEach(function (g) { if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; } });
+      gens.forEach(function (g) {
+        if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; }
+        // 기존 프로젝트의 숫자 등급 척도에 '판독불가' 자동 보강(이미 있으면 유지)
+        (g.traits || []).forEach(function (t) {
+          if (t.type === 'rating') { var before = (t.scale || []).length; t.scale = withUnreadable(t.scale); if (t.scale.length !== before) mig = true; }
+          // 타입 변경 후 남아있던 잘못된 측정단위 정리(수치형 외에는 이전 단위 제거)
+          if (normalizeUnit(t)) mig = true;
+        });
+      });
       S.gens = gens;
       if (mig) await kvSet('gens', gens);
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
