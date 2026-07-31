@@ -52,7 +52,10 @@
     return safeName(g.projName) + '_' + safeName(lab) + '_' + (p.indiv || 1) + '_' + safeName(tn) + '_' + ymd(p.createdAt) + '.jpg';
   }
   function dataURLtoBytes(u) { var i = u.indexOf(','), b = atob(u.slice(i + 1)), a = new Uint8Array(b.length); for (var j = 0; j < b.length; j++) a[j] = b.charCodeAt(j); return a; }
-  function downloadBlob(blob, filename) { var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 2000); }
+  function downloadBlob(blob, filename) {
+    // 안드로이드 앱(WebView)에서는 blob: 다운로드가 동작하지 않으므로 네이티브 저장으로 넘긴다
+    if (window.CMSaveBlob && window.CMSaveBlob(blob, filename)) return;
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { try { URL.revokeObjectURL(a.href); } catch (e) {} }, 2000); }
   var _crcT = null;
   function crc32(buf) { if (!_crcT) { _crcT = []; for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; _crcT[n] = c >>> 0; } } var crc = 0 ^ (-1); for (var i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ _crcT[(crc ^ buf[i]) & 0xFF]; return (crc ^ (-1)) >>> 0; }
   function zipStrBytes(s) { var e = unescape(encodeURIComponent(s)), a = new Uint8Array(e.length); for (var i = 0; i < e.length; i++) a[i] = e.charCodeAt(i) & 0xff; return a; }
@@ -2943,8 +2946,11 @@
   }
   function renderVoice() {
     var l = curLine(), v = $('view-voice'), vo = S.voice || (S.voice = { transcript: '', parsed: [], listening: false });
-    // 안드로이드 WebView(설치형 앱)에는 웹 표준 SpeechRecognition이 없음 → 키보드 마이크(음성 입력) 방식으로 보완
+    // 안드로이드 WebView에는 웹 표준 SpeechRecognition이 없음 →
+    //  (1) 앱(네이티브)에서는 native-bridge.js가 안드로이드 SpeechRecognizer를 같은 형태로 주입해 마이크 버튼이 동작
+    //  (2) 그마저 없는 환경에서는 키보드 마이크(IME 음성 입력)로 대체
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition, supported = !!SR;
+    var nativeSR = !!window.CM_SPEECH_NATIVE;
     function parsedListHtml() {
       if (!(vo.parsed && vo.parsed.length)) return '<div style="font-size:12px;color:var(--text-muted);padding:6px 2px">형질 이름과 값을 말하거나 입력하면 여기에 인식된 값이 표시됩니다. 예: “병징 5 발병면적률 30 마디수 12”</div>';
       return vo.parsed.map(function (pp, i) { return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="flex:1;font-size:13px"><b>' + esc(pp.name) + '</b> → ' + esc(String(pp.value)) + '</div><button class="btn vApply" data-i="' + i + '" style="height:34px;padding:0 12px;font-size:12px">적용</button></div>'; }).join('') +
@@ -2955,7 +2961,7 @@
       '<div style="flex:1;padding:16px 16px;overflow:auto">' +
       // 1) 웹 음성인식이 되는 환경(크롬 등)에서는 마이크 버튼 제공
       (supported ?
-        '<div style="text-align:center;padding:4px 0 8px"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:#C0392B;border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', '#fff', 34) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div></div>'
+        '<div style="text-align:center;padding:4px 0 8px"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:#C0392B;border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', '#fff', 34) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div>' + (nativeSR ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">앱 내장 음성인식 · 인터넷 없이도 동작(언어팩 설치 시)</div>' : '') + '</div>'
         : '<div class="card" style="line-height:1.7;font-size:13px;color:var(--text-secondary)">' + ico('microphone', '#3B6D11', 15) + ' 이 앱에서는 웹 음성인식을 쓸 수 없어, <b>키보드의 마이크 버튼</b>으로 음성 입력합니다.<br><span style="color:var(--text-muted)">아래 칸을 누르면 키보드가 뜹니다 → 키보드의 <b>🎤 마이크</b>를 눌러 말하면 글자로 입력됩니다.</span></div>') +
       // 2) 키보드 마이크/직접 입력 칸 — 모든 환경 공통, 말한 내용이 그대로 파싱됨
       '<div style="font-size:12px;font-weight:600;margin:14px 0 6px">' + (supported ? '또는 키보드 마이크로 입력' : '음성·직접 입력') + '</div>' +
@@ -2992,7 +2998,7 @@
         var rec = new SR(); vo._rec = rec; rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
         var finalT = '';
         rec.onresult = function (e) { var interim = ''; for (var i = e.resultIndex; i < e.results.length; i++) { var r = e.results[i]; if (r.isFinal) finalT += r[0].transcript; else interim += r[0].transcript; } vo.transcript = (finalT + ' ' + interim).trim(); var t2 = $('voManual'); if (t2) t2.value = vo.transcript; };
-        rec.onerror = function () { vo.listening = false; renderVoice(); };
+        rec.onerror = function (e) { vo.listening = false; vo._err = (e && e.message) ? e.message : ''; renderVoice(); if (vo._err) toast(vo._err); };
         rec.onend = function () { vo.listening = false; vo.transcript = (finalT || vo.transcript || '').trim(); vo.parsed = parseVoice(vo.transcript); renderVoice(); };
         vo.listening = true; renderVoice(); try { rec.start(); } catch (e) { vo.listening = false; renderVoice(); }
       };
@@ -3223,6 +3229,13 @@
     S._exitAt = Date.now(); toast('뒤로가기를 한 번 더 누르면 종료됩니다');
     return 'ok';
   }
+  // 안드로이드 앱(네이티브)의 하드웨어 뒤로가기 → 위 onBack()을 그대로 사용.
+  // true면 앱이 처리함, false면 네이티브가 앱을 종료한다.
+  window.CM_ON_BACK = function () {
+    var r = null;
+    try { r = onBack(); } catch (e) { r = null; }
+    return r !== 'exit';
+  };
   function askSaveGenEdit() {
     if (!S.geDirty) { go('home'); return; }
     openOverlay(

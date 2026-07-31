@@ -1,7 +1,7 @@
 // Crop Memo Pro — service worker (network-first shell, offline fallback)
-const CACHE = 'cropmemo-v3';
+const CACHE = 'cropmemo-v4';
 const SHELL = [
-  './', './index.html', './app.js', './icons.js', './styles.css',
+  './', './index.html', './app.js', './icons.js', './styles.css', './native-bridge.js',
   './manifest.webmanifest',
   './CropMemoPro_GAS_Code.gs',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'
