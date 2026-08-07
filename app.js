@@ -1057,7 +1057,7 @@
     return '';
   }
   function wireNew(w) {
-    $('wClose').onclick = function () { if (confirm('작성 중인 내용을 취소할까요?')) { S.wiz = null; go('home'); } };
+    $('wClose').onclick = function () { askConfirm('작성 중인 내용을 취소할까요?', { ok: '취소하기', danger: true }).then(function (ok) { if (ok) { S.wiz = null; go('home'); } }); };
     if ($('wPrev')) $('wPrev').onclick = function () { S._wizScroll = 0; w.step--; renderNew(); };
     $('wNext').onclick = function () { var r = wizBlock(w); if (r) { var h = $('wHint'); h.textContent = r; h.style.display = 'block'; return; } if (w.step < 3) { S._wizScroll = 0; w.step++; renderNew(); } else createProject(); };
     if (w.step === 1) {
@@ -1222,9 +1222,9 @@
     if (f) { f.ids.push(pid); saveFolders(); }
     kvSet('gens', S.gens).then(function () { renderHome(); toast('복제됨 · ' + newName); });
   }
-  function deleteProject(key) {
+  async function deleteProject(key) {
     var p = projectOf(key); if (!p) return;
-    if (!confirm('"' + p.name + '" 과제를 삭제할까요?\n세대 ' + p.items.length + '개와 수집한 데이터가 모두 삭제됩니다.')) return;
+    if (!(await askConfirm('"' + p.name + '" 과제를 삭제할까요?\n세대 ' + p.items.length + '개와 수집한 데이터가 모두 삭제됩니다.', { title: '과제 삭제', danger: true, ok: '삭제' }))) return;
     var ids = p.items.map(function (it) { return it.g.id; });
     S.gens = S.gens.filter(function (g) { return ids.indexOf(g.id) < 0; });
     if (S.genIdx >= S.gens.length) S.genIdx = Math.max(0, S.gens.length - 1);
@@ -1235,9 +1235,9 @@
     });
     toast('과제 삭제됨');
   }
-  function deleteGen(i) {
+  async function deleteGen(i) {
     var g = S.gens[i]; if (!g) return;
-    if (!confirm('"' + g.projName + ' · ' + g.label + '"을(를) 삭제할까요?\n수집한 데이터도 함께 삭제됩니다.')) return;
+    if (!(await askConfirm('"' + g.projName + ' · ' + g.label + '"을(를) 삭제할까요?\n수집한 데이터도 함께 삭제됩니다.', { title: '세대 삭제', danger: true, ok: '삭제' }))) return;
     var gid = g.id; S.gens.splice(i, 1);
     if (S.genIdx >= S.gens.length) S.genIdx = S.gens.length - 1; if (S.genIdx < 0) S.genIdx = 0;
     obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === gid) st.delete(r.k); }); });
@@ -1384,14 +1384,14 @@
     if ($('geDelGen')) $('geDelGen').onclick = function () { collect(); deleteGen(i); };
     v.querySelectorAll('.gegen').forEach(function (b) { b.onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.editIdx = +b.getAttribute('data-i'); renderGenEdit(); }); }; });
     $('geAddGen').onclick = function () { addGenPopup(projKeyOf(g), i); };
-    if ($('geTraitAll')) $('geTraitAll').onclick = function () {
-      if (!confirm('현재 형질세트를 이 과제의 모든 세대에 적용할까요?\n각 세대의 기존 형질 구성은 대체됩니다(입력값은 유지).')) return;
+    if ($('geTraitAll')) $('geTraitAll').onclick = async function () {
+      if (!(await askConfirm('현재 형질세트를 이 과제의 모든 세대에 적용할까요?\n각 세대의 기존 형질 구성은 대체됩니다(입력값은 유지).', { title: '형질세트 적용' }))) return;
       var pj = projectOf(projKeyOf(g));
       pj.items.forEach(function (it) { if (it.g.id !== g.id) it.g.traits = JSON.parse(JSON.stringify(g.traits)); });
       kvSet('gens', S.gens).then(function () { toast('모든 세대에 적용됨'); });
     };
     $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), pedigree: '', gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
-    v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } if (!confirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.')) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }; });
+    v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } askConfirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.', { title: '계통 삭제', danger: true, ok: '삭제' }).then(function (ok) { if (!ok) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }); }; });
     S._geSave = function () {
       collect();
       var newName = $('geName').value.trim() || g.projName;
@@ -1443,7 +1443,7 @@
     return '<div class="hprojrow" data-p="' + esc(p.id) + '" style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px' + (inFolder ? ';margin-left:12px' : '') + '">' +
       '<div style="display:flex;align-items:center;gap:9px">' +
         '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
-        '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + (p.crop ? esc(p.crop) + ' · ' : '') + '세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
+        '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
         (inFolder ? '<button class="btn hprojout" data-p="' + esc(p.id) + '" style="height:30px;padding:0 8px;font-size:11px;flex:0 0 auto">빼기</button>' : '') +
         '<button class="btn hprojcopy" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('copy', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
@@ -1556,7 +1556,7 @@
         '<div style="font-size:11px;color:#3B6D11;font-weight:600">이어서 수집</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">' +
           '<div style="width:44px;height:44px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto"><span style="font-size:15px;font-weight:700;color:#27500A">' + esc(g.label) + '</span></div>' +
-          '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + (g.crop ? '<span style="color:' + (g.color || '#639922') + '">' + esc(g.crop) + '</span> ' : '') + '' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
         '</div>' +
         '<button class="btn primary" id="hResume" style="width:100%;height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px">' + ico('clipboard-list', '#fff', 20) + ' 야장 수집 계속</button>' +
       '</div>' +
@@ -1601,7 +1601,7 @@
       '<div id="cHead" style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px 9px;border-bottom:0.5px solid var(--border)">' +
         '<button class="btn" id="cBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button>' +
         '<div style="flex:1;min-width:0"><div style="font-size:16px;font-weight:600">야장 수집</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (g.crop ? esc(g.crop) + ' ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
         '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">' +
           '<button class="btn" id="cMap" style="padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:4px">' + ico('map-2', 'var(--text-primary)', 15) + ' 필드맵</button>' +
           '<span style="font-size:10px;color:var(--text-success)">' + ico('device-floppy', 'var(--text-success)', 12) + ' ' + (S.lastSaved ? tm(S.lastSaved) + ' 저장' : '자동저장') + '</span>' +
@@ -1806,6 +1806,22 @@
     o.addEventListener('click', function (e) { if (e.target === o && !o.classList.contains('lock')) closeOverlay(); });
     document.body.appendChild(o);
     return o;
+  }
+  // 확인 팝업 — 브라우저 기본 confirm 은 '주소 내용:' 이 함께 떠서 앱 팝업으로 대신한다
+  function askConfirm(msg, opts) {
+    opts = opts || {};
+    var body = esc(msg).replace(/\n/g, '<br>');
+    return new Promise(function (resolve) {
+      openOverlay(
+        (opts.title ? '<div class="ovl-title">' + esc(opts.title) + '</div>' : '') +
+        '<div class="ovl-msg"' + (opts.big ? ' style="font-size:26px;line-height:1.45;color:var(--text-primary);font-weight:600;text-align:center;padding:8px 0 4px"' : '') + '>' + body + '</div>' +
+        '<div class="ovl-btns"><button class="btn" id="cfNo">취소</button>' +
+        '<button class="btn' + (opts.danger ? '' : ' primary') + '" id="cfYes"' +
+          (opts.danger ? ' style="background:#C0392B;border-color:#A5342A;color:#fff;font-weight:600"' : '') + '>' + esc(opts.ok || '확인') + '</button></div>'
+      );
+      $('cfNo').onclick = function () { closeOverlay(); resolve(false); };
+      $('cfYes').onclick = function () { closeOverlay(); resolve(true); };
+    });
   }
   function dateMenu(d) {
     var g = curGen(), only = g.surveyDates.length <= 1;
@@ -2057,7 +2073,7 @@
     v.querySelectorAll('.tE-name').forEach(function (inp) { inp.onchange = function () { var t = g.traits[+inp.getAttribute('data-i')]; t.name = inp.value.trim() || t.name; }; });
     v.querySelectorAll('.tE-type').forEach(function (sel) { sel.onchange = function () { syncTE(); var t = g.traits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderTraitEditor(); }; });
     v.querySelectorAll('.tE-series').forEach(function (sw) { sw.onclick = function () { syncTE(); var t = g.traits[+sw.getAttribute('data-i')]; t.series = !t.series; renderTraitEditor(); }; });
-    v.querySelectorAll('.tE-del').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (g.traits.length <= 1) { toast('형질은 최소 1개 필요합니다'); return; } if (!confirm('"' + g.traits[i].name + '" 형질을 삭제할까요?')) return; syncTE(); var tid = g.traits[i].id; g.traits.splice(i, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.traitId === tid) st.delete(r.k); }); }); renderTraitEditor(); }; });
+    v.querySelectorAll('.tE-del').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (g.traits.length <= 1) { toast('형질은 최소 1개 필요합니다'); return; } askConfirm('"' + g.traits[i].name + '" 형질을 삭제할까요?', { title: '형질 삭제', danger: true, ok: '삭제' }).then(function (ok) { if (!ok) return; syncTE(); var tid = g.traits[i].id; g.traits.splice(i, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.traitId === tid) st.delete(r.k); }); }); renderTraitEditor(); }); }; });
     v.querySelectorAll('.tE-unit').forEach(function (inp) { inp.oninput = function () { g.traits[+inp.getAttribute('data-i')].unit = inp.value.trim(); }; });
     v.querySelectorAll('.tE-uchip').forEach(function (b) { b.onclick = function () { syncTE(); g.traits[+b.getAttribute('data-i')].unit = b.getAttribute('data-u'); renderTraitEditor(); }; });
     v.querySelectorAll('.tE-scale').forEach(function (inp) { inp.oninput = function () { g.traits[+inp.getAttribute('data-i')].scale = parseScale(inp.value); }; });
@@ -3188,7 +3204,7 @@
     v.querySelectorAll('.pThumb').forEach(function (im) { im.onclick = function () { S.drawId = im.getAttribute('data-id'); go('draw'); }; });
     v.querySelectorAll('.pSel').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); sel[id] = !sel[id]; renderPhoto(); }; });
     v.querySelectorAll('.pSave').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); var p = ps.filter(function (x) { return x.id === id; })[0]; if (p) { savePhotoFile(p); toast('저장됨'); } }; });
-    v.querySelectorAll('.pDel').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); if (!confirm('사진을 삭제할까요?')) return; photoDelete(id).then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; delete sel[id]; renderPhoto(); }); }; });
+    v.querySelectorAll('.pDel').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-id'); askConfirm('사진을 삭제할까요?', { big: true, danger: true, ok: '삭제' }).then(function (ok) { if (!ok) return; photoDelete(id).then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; delete sel[id]; renderPhoto(); }); }); }; });
   }
   function renderDraw() {
     var l = curLine(), v = $('view-draw');
@@ -3448,9 +3464,9 @@
   }
   function exportPhotoFiles() {
     toast('사진 모으는 중…');
-    collectProjImages().then(function (files) {
+    collectProjImages().then(async function (files) {
       if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
-      if (files.length > 5 && !confirm(files.length + '개 파일을 다운로드 폴더에 저장할까요?\n(브라우저가 여러 파일 저장 허용을 물어볼 수 있습니다)')) return;
+      if (files.length > 5 && !(await askConfirm(files.length + '개 파일을 다운로드 폴더에 저장할까요?\n(브라우저가 여러 파일 저장 허용을 물어볼 수 있습니다)', { title: '사진 다운로드', ok: '저장' }))) return;
       toast(files.length + '개 저장 중…');
       files.forEach(function (f, i) {
         setTimeout(function () {
@@ -3570,7 +3586,7 @@
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     $('sGuide').onclick = function () { openGuide(); };
     $('sReset').onclick = async function () {
-      if (!confirm('모든 로컬 데이터를 삭제할까요? (되돌릴 수 없습니다)')) return;
+      if (!(await askConfirm('모든 로컬 데이터를 삭제할까요?\n되돌릴 수 없습니다.', { title: '초기화', danger: true, ok: '모두 삭제' }))) return;
       indexedDB.deleteDatabase(DB_NAME);
       setTimeout(function () { location.reload(); }, 300);
     };
