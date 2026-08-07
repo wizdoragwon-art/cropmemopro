@@ -32,10 +32,30 @@
   function photoGet(id) { return new Promise(function (res) { var r = os('photos', 'readonly').get(id); r.onsuccess = function () { res(r.result); }; r.onerror = function () { res(null); }; }); }
   function photoDelete(id) { return new Promise(function (res) { var r = os('photos', 'readwrite').delete(id); r.onsuccess = function () { res(true); }; r.onerror = function () { res(false); }; }); }
   function photosForLine(genId, lineId) { return new Promise(function (res) { var out = [], r = os('photos', 'readonly').openCursor(); r.onsuccess = function (e) { var c = e.target.result; if (c) { if (c.value.genId === genId && c.value.lineId === lineId) out.push(c.value); c.continue(); } else { out.sort(function (a, b) { return a.createdAt - b.createdAt; }); res(out); } }; r.onerror = function () { res(out); }; }); }
-  function fileToScaledDataURL(file, maxDim) {
+  // 사진 화질 단계 — 설정에서 고를 수 있다 (기본: 원본)
+  //   orig 는 카메라가 준 JPEG를 다시 압축하지 않고 그대로 보관한다(무손실)
+  var PHOTO_Q = { low:  { dim: 2600, q: 0.92, name: '저화질', kb: 520,  sub: '2600×1950 · 약 520KB' },
+                  orig: { dim: 3600, q: 0.95, name: '원본',   kb: 3000, sub: '원본 그대로 · 2~5MB', orig: true } };
+  var PHOTO_ORIG_MAX = 14 * 1048576;      // 이보다 큰 원본은 3600px로 줄여 담는다(메모리 보호)
+  function photoQ() { return PHOTO_Q[(S.settings && S.settings.photoQ) || 'orig'] || PHOTO_Q.orig; }
+  function fileToDataURL(file) {
+    return new Promise(function (res, rej) {
+      var fr = new FileReader();
+      fr.onload = function () { res(String(fr.result || '')); };
+      fr.onerror = function () { rej(fr.error || new Error('사진을 읽지 못했습니다')); };
+      fr.readAsDataURL(file);
+    });
+  }
+  // 설정한 화질로 사진을 준비한다 — '원본'이면 JPEG 원본을 그대로 쓴다
+  function preparePhoto(file) {
+    var pq = photoQ();
+    if (pq.orig && /^image\/jpe?g$/i.test(file.type || '') && file.size <= PHOTO_ORIG_MAX) return fileToDataURL(file);
+    return fileToScaledDataURL(file, pq.dim, pq.q);
+  }
+  function fileToScaledDataURL(file, maxDim, quality) {
     return new Promise(function (res, rej) {
       var img = new Image();
-      img.onload = function () { var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height; var sc = Math.min(1, maxDim / Math.max(w, h || 1)); var cw = Math.max(1, Math.round(w * sc)), ch = Math.max(1, Math.round(h * sc)); var c = document.createElement('canvas'); c.width = cw; c.height = ch; c.getContext('2d').drawImage(img, 0, 0, cw, ch); try { res(c.toDataURL('image/jpeg', 0.82)); } catch (e) { rej(e); } };
+      img.onload = function () { var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height; var sc = Math.min(1, maxDim / Math.max(w, h || 1)); var cw = Math.max(1, Math.round(w * sc)), ch = Math.max(1, Math.round(h * sc)); var c = document.createElement('canvas'); c.width = cw; c.height = ch; var cx = c.getContext('2d'); cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high'; cx.drawImage(img, 0, 0, cw, ch); try { res(c.toDataURL('image/jpeg', quality || 0.82)); } catch (e) { rej(e); } };
       img.onerror = rej; img.src = URL.createObjectURL(file);
     });
   }
@@ -579,11 +599,11 @@
   function txtBytes(s) { return zipStrBytes('﻿' + s); }
   function bkSize(n) { return n > 1048576 ? (Math.round(n / 104857.6) / 10) + 'MB' : (Math.round(n / 102.4) / 10) + 'KB'; }
 
-  async function buildBackupFiles(onStep) {
+  async function buildBackupFiles(onStep, sink) {
     cleanFolders();
     var ps = projects();
     if (!ps.length) return null;
-    var stamp = ymd(), files = [], summary = [], nCsv = 0, nImg = 0, bytes = 0;
+    var stamp = ymd(), files = [], summary = [], nCsv = 0, nImg = 0, bytes = 0, nFiles = 0;
     for (var i = 0; i < ps.length; i++) {
       var p = ps[i], dir = backupPathOf(p);
       if (onStep) onStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + ps.length + '\n' + p.name, (i / ps.length) * 0.85);
@@ -595,18 +615,26 @@
       if (lab) { files.push({ name: dir + safeName(p.name) + '_라벨목록_' + stamp + '.csv', data: txtBytes(lab), mtime: now }); nCsv++; }
       var imgs = await collectProjImages(p);
       for (var j = 0; j < imgs.length; j++) {
-        try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts }); nImg++; } catch (e) {}
+        try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts, photo: true }); nImg++; } catch (e) {}
         imgs[j].url = null;   // 데이터URL 원본은 바로 놓아준다(메모리 절약)
+      }
+      if (sink) {                                   // 폴더 저장 — 과제 하나를 다 쓰고 메모리를 비운다
+        files.forEach(function (f) { bytes += f.data.length; });
+        await sink(files, i, ps.length);
+        nFiles += files.length; files = [];
       }
       summary.push('· ' + dir + '\r\n    야장 ' + (built ? built.rows : 0) + '행 · 라벨 ' + p.lines + '개 · 사진 ' + imgs.length + '장');
     }
-    files.forEach(function (f) { bytes += f.data.length; });
+    if (!sink) files.forEach(function (f) { bytes += f.data.length; });
+    var total = sink ? nFiles + 1 : files.length + 1;
     var info = 'Crop Memo Pro 기기 백업\r\n백업 일시: ' + new Date().toLocaleString('ko-KR') +
-      '\r\n과제 ' + ps.length + '개 · 파일 ' + files.length + '개 · ' + bkSize(bytes) +
+      '\r\n과제 ' + ps.length + '개 · 파일 ' + total + '개 · ' + bkSize(bytes) +
       '\r\n\r\n[폴더 구조]\r\n' + summary.join('\r\n') +
       '\r\n\r\nCSV는 UTF-8(BOM) 롱포맷이라 엑셀에서 바로 열립니다.\r\n';
-    files.unshift({ name: BK_ROOT + '/백업정보.txt', data: txtBytes(info), mtime: Date.now() });
-    return { files: files, projects: ps.length, csv: nCsv, img: nImg, bytes: bytes, stamp: stamp };
+    var infoFile = { name: BK_ROOT + '/백업정보.txt', data: txtBytes(info), mtime: Date.now() };
+    if (sink) { await sink([infoFile], ps.length, ps.length); nFiles++; }
+    else files.unshift(infoFile);
+    return { files: files, projects: ps.length, csv: nCsv, img: nImg, bytes: bytes, stamp: stamp, count: sink ? nFiles : files.length };
   }
 
   // ----- (선택) 실제 폴더로 쓰기 — File System Access API 지원 브라우저 -----
@@ -638,36 +666,63 @@
       return q;
     } catch (e) { return 'denied'; }
   }
+  // 기억해 둔 폴더가 아직 기기에 남아 있는지 확인한다.
+  // 폴더를 지웠으면 핸들은 남아 있어도 InvalidStateError/NotFoundError 가 난다.
+  async function dirAlive(h) {
+    try {
+      var it = (typeof h.values === 'function') ? h.values() : h.entries();
+      await it.next();          // 한 항목만 읽어 본다 (비어 있어도 예외는 나지 않는다)
+      return true;
+    } catch (e) { return false; }
+  }
   async function getBackupDir(forcePick) {
     var h = null;
     if (!forcePick) { try { h = await kvGet('backupDir'); } catch (e) { h = null; } }
     if (h && (await dirPerm(h, true)) !== 'granted') h = null;
+    if (h && !(await dirAlive(h))) { h = null; try { await kvSet('backupDir', null); } catch (e) {} }   // 지워진 폴더 → 다시 고르게 한다
     if (!h) {
       h = await window.showDirectoryPicker({ id: 'cmpro-backup', mode: 'readwrite', startIn: 'downloads' });
       try { await kvSet('backupDir', h); } catch (e) {}
     }
     return h;
   }
-  async function writeBackupToDir(root, files, flat, onStep) {
-    var cache = {};
+  // 이미 같은 이름·같은 크기로 저장돼 있는 사진인지 확인 (같으면 다시 쓰지 않는다)
+  async function sameFileExists(dir, name, size) {
+    try {
+      var fh = await dir.getFileHandle(name);        // create 안 함 — 없으면 예외
+      var f = await fh.getFile();
+      return f && f.size === size;
+    } catch (e) { return false; }
+  }
+  function makeDirWriter(root, flat) {
+    var cache = {}, skipped = 0, written = 0;
     async function dirFor(path) {
       if (cache[path]) return cache[path];
       var h = root, segs = path.split('/').filter(Boolean);
       for (var i = 0; i < segs.length; i++) h = await h.getDirectoryHandle(segs[i], { create: true });
       cache[path] = h; return h;
     }
-    for (var i = 0; i < files.length; i++) {
-      var f = files[i], d, nm;
-      if (flat) { d = root; nm = flatBackupName(f.name); }
-      else {
-        var k = f.name.lastIndexOf('/');
-        d = await dirFor(k < 0 ? '' : f.name.slice(0, k)); nm = k < 0 ? f.name : f.name.slice(k + 1);
+    return {
+      skipped: function () { return skipped; },
+      written: function () { return written; },
+      write: async function (files, onStep) {
+        for (var i = 0; i < files.length; i++) {
+          var f = files[i], d, nm;
+          if (flat) { d = root; nm = flatBackupName(f.name); }
+          else {
+            var k = f.name.lastIndexOf('/');
+            d = await dirFor(k < 0 ? '' : f.name.slice(0, k)); nm = k < 0 ? f.name : f.name.slice(k + 1);
+          }
+          // 사진은 같은 파일이 이미 있으면 건너뛴다 (다시 백업할 때 시간·용량 절약)
+          if (f.photo && await sameFileExists(d, nm, f.data.length)) { skipped++; f.data = null; continue; }
+          var fh = await d.getFileHandle(nm, { create: true });
+          var w = await fh.createWritable();
+          await w.write(f.data); await w.close();
+          written++; f.data = null;                    // 쓴 자료는 바로 놓아준다
+          if (onStep && (written % 3 === 0)) onStep((flat ? '폴더에 파일 저장 중 ' : '폴더에 저장 중 ') + written + '개', 0.9);
+        }
       }
-      var fh = await d.getFileHandle(nm, { create: true });
-      var w = await fh.createWritable();
-      await w.write(f.data); await w.close();
-      if (onStep && (i % 3 === 0)) onStep((flat ? '폴더에 파일 저장 중 ' : '폴더에 저장 중 ') + (i + 1) + '/' + files.length, 0.85 + (i / files.length) * 0.15);
-    }
+    };
   }
 
   // ----- 진행 표시 -----
@@ -705,41 +760,59 @@
       // 하위 폴더를 만들 수 없는 기기(안드로이드 등)면 고른 폴더에 파일을 하나씩 나란히 저장한다
       if (dir) {
         flat = !(await backupSubdirOK(dir));
-        if (flat) { toast('이 폴더에는 하위 폴더를 만들 수 없어 파일을 나란히 저장합니다 (' + BK_SUBDIR_ERR + ')'); await bkYield(); }
+        if (flat && (BK_SUBDIR_ERR === 'InvalidStateError' || BK_SUBDIR_ERR === 'NotFoundError')) {
+          // 저장해 두었던 폴더가 기기에서 사라진 경우 — 기억을 지우고 폴더를 다시 고르게 한다
+          try { await kvSet('backupDir', null); } catch (e2) {}
+          try { dir = await getBackupDir(true); flat = !(await backupSubdirOK(dir)); }
+          catch (e3) { dir = null; flat = false; toast('저장 폴더를 찾을 수 없어 ZIP으로 저장합니다'); await bkYield(); }
+        } else if (flat) { toast('이 폴더에는 하위 폴더를 만들 수 없어 파일을 나란히 저장합니다'); await bkYield(); }
       }
     }
     backupProgress('자료를 모으는 중…');
     await bkYield();
+    var b = null;
     try {
-      var b = await buildBackupFiles(bkStep);
-      if (!b || b.files.length <= 1) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
       if (dir) {
+        // ── 폴더 저장 ── 과제 하나씩 모아 바로 쓰고 비운다 (사진이 커도 메모리 부담이 적다)
+        var writer = makeDirWriter(dir, flat), failed = null;
         try {
-          await writeBackupToDir(dir, b.files, flat, bkStep);
-        } catch (we) {
-          // 쓰는 도중 막히면(권한·플랫폼 제한) 모아둔 자료를 그대로 ZIP으로 저장
-          try { await kvSet('backupDir', null); } catch (e2) {}
-          bkStep('폴더에 저장할 수 없어 ZIP으로 저장합니다…', 0.92);
-          await bkYield();
-          downloadBlob(makeZipBlob(b.files), BK_ROOT + '_백업_' + b.stamp + '.zip');
+          b = await buildBackupFiles(bkStep, function (fs) { return writer.write(fs, bkStep); });
+        } catch (we) { failed = we; }
+        if (!failed) {
+          if (!b || !b.projects) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
           closeOverlay();
-          toast('폴더 저장이 막혀 ZIP으로 저장했습니다 · 파일 ' + b.files.length + '개');
+          var sk = writer.skipped();
+          toast((flat ? '선택한 폴더에 파일 ' : '백업 완료 · 과제 ' + b.projects + '개 · 파일 ') + writer.written() + (flat ? '개 저장됨' : '개') + (sk ? ' · 같은 사진 ' + sk + '장 건너뜀' : ''));
           S.lastBackup = Date.now();
           kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
           return;
         }
-        closeOverlay();
-        toast((flat ? '선택한 폴더에 파일 ' : '백업 완료 · 과제 ' + b.projects + '개 · 파일 ') + b.files.length + (flat ? '개 저장됨' : '개'));
-      } else {
-        bkStep('압축하는 중…\n파일 ' + b.files.length + '개 · ' + bkSize(b.bytes), 0.92);
+        // 폴더에 쓰다가 막혔다 — 기억을 지우고 ZIP으로 넘어간다
+        try { await kvSet('backupDir', null); } catch (e2) {}
+        var gone = failed && (failed.name === 'InvalidStateError' || failed.name === 'NotFoundError');
+        bkStep((gone ? '저장 폴더가 없어졌습니다 · ' : '폴더에 저장할 수 없어 ') + 'ZIP으로 저장합니다…', 0.5);
         await bkYield();
-        var blob = makeZipBlob(b.files);
-        downloadBlob(blob, BK_ROOT + '_백업_' + b.stamp + '.zip');
-        bkStep('저장했습니다', 1);
-        await bkYield();
+        b = await buildBackupFiles(bkStep);
+        if (!b || b.files.length <= 1) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
+        downloadBlob(makeZipBlob(b.files), BK_ROOT + '_백업_' + b.stamp + '.zip');
         closeOverlay();
-        toast('다운로드 폴더에 저장됨 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
+        toast(gone ? '저장 폴더가 없어져 ZIP으로 저장했습니다 · 다시 누르면 폴더를 고를 수 있습니다'
+                   : '폴더 저장이 막혀 ZIP으로 저장했습니다 · 파일 ' + b.files.length + '개');
+        S.lastBackup = Date.now();
+        kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+        return;
       }
+      // ── ZIP 저장 ──
+      b = await buildBackupFiles(bkStep);
+      if (!b || b.files.length <= 1) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
+      if (b.bytes > 300 * 1048576) { toast('자료가 큽니다 (' + bkSize(b.bytes) + ') · 폴더에 저장하면 더 안전합니다'); await bkYield(); }
+      bkStep('압축하는 중…\n파일 ' + b.files.length + '개 · ' + bkSize(b.bytes), 0.92);
+      await bkYield();
+      downloadBlob(makeZipBlob(b.files), BK_ROOT + '_백업_' + b.stamp + '.zip');
+      bkStep('저장했습니다', 1);
+      await bkYield();
+      closeOverlay();
+      toast('다운로드 폴더에 저장됨 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
       S.lastBackup = Date.now();
       kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
     } catch (e) {
@@ -1265,7 +1338,7 @@
         return '<button class="pill gegen' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
       }).join('') + '</div></div>';
     v.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · 세대 ' + proj.items.length + ' · 편집 중 ' + esc(g.label) + '</div></div></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + '세대 ' + proj.items.length + ' · 편집 중 ' + esc(g.label) + '</div></div></div>' +
       '<div style="flex:1;padding:16px 14px;overflow:auto">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></label><input class="ein" id="geName" style="margin-top:6px" value="' + esc(g.projName) + '">' +
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></div>' +
@@ -1370,7 +1443,7 @@
     return '<div class="hprojrow" data-p="' + esc(p.id) + '" style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px' + (inFolder ? ';margin-left:12px' : '') + '">' +
       '<div style="display:flex;align-items:center;gap:9px">' +
         '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
-        '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + esc(p.crop) + ' · 세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
+        '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">' + (p.crop ? esc(p.crop) + ' · ' : '') + '세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
         (inFolder ? '<button class="btn hprojout" data-p="' + esc(p.id) + '" style="height:30px;padding:0 8px;font-size:11px;flex:0 0 auto">빼기</button>' : '') +
         '<button class="btn hprojcopy" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('copy', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
@@ -1483,7 +1556,7 @@
         '<div style="font-size:11px;color:#3B6D11;font-weight:600">이어서 수집</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">' +
           '<div style="width:44px;height:44px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto"><span style="font-size:15px;font-weight:700;color:#27500A">' + esc(g.label) + '</span></div>' +
-          '<div style="flex:1"><div style="font-size:14px;font-weight:600"><span style="color:' + (g.color || '#639922') + '">' + esc(g.crop) + '</span> ' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
+          '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + (g.crop ? '<span style="color:' + (g.color || '#639922') + '">' + esc(g.crop) + '</span> ' : '') + '' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
         '</div>' +
         '<button class="btn primary" id="hResume" style="width:100%;height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px">' + ico('clipboard-list', '#fff', 20) + ' 야장 수집 계속</button>' +
       '</div>' +
@@ -1528,7 +1601,7 @@
       '<div id="cHead" style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px 9px;border-bottom:0.5px solid var(--border)">' +
         '<button class="btn" id="cBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button>' +
         '<div style="flex:1;min-width:0"><div style="font-size:16px;font-weight:600">야장 수집</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.crop) + ' ' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (g.crop ? esc(g.crop) + ' ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
         '<div style="flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">' +
           '<button class="btn" id="cMap" style="padding:5px 10px;font-size:12px;display:flex;align-items:center;gap:4px">' + ico('map-2', 'var(--text-primary)', 15) + ' 필드맵</button>' +
           '<span style="font-size:10px;color:var(--text-success)">' + ico('device-floppy', 'var(--text-success)', 12) + ' ' + (S.lastSaved ? tm(S.lastSaved) + ' 저장' : '자동저장') + '</span>' +
@@ -1973,7 +2046,7 @@
         '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
     }).join('');
     v.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
       '<div style="flex:1;padding:14px 14px;overflow:auto" id="tEScroll"><div id="tEList">' + rows + '</div>' +
         '<button class="btn" id="tEAdd" style="width:100%;height:46px;font-size:14px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 18) + ' 형질 추가</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러 끌어도 됩니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있고, 이름·종류를 바꿔도 기존 입력값은 유지됩니다.</div>' +
@@ -2570,7 +2643,7 @@
     if (!traitById(S.anTrait)) S.anTrait = g.traits[0].id;
     if (!S.anTab) S.anTab = 'stat';
     v.innerHTML =
-      '<div style="padding:14px 16px 8px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">분석</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + ' · ' + esc(g.crop) + '</div></div>' +
+      '<div style="padding:14px 16px 8px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">분석</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + (g.crop ? ' · ' + esc(g.crop) : '') + '</div></div>' +
       '<div style="display:flex;gap:8px;padding:10px 14px 2px">' +
         '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">요약 · 통계</button>' +
         '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">그래프 생성</button>' +
@@ -2970,7 +3043,7 @@
   function renderBulk() {
     var g = S.gens[S.bulkIdx]; if (!g) { go('home'); return; }
     var v = $('view-bulk');
-    var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="bBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">라벨 일괄등록</div><div style="font-size:11px;color:var(--text-muted)">' + esc(g.crop) + ' · ' + esc(g.label) + ' · 계통 ' + g.lines.length + '</div></div></div>';
+    var head = '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="bBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">라벨 일괄등록</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · 계통 ' + g.lines.length + '</div></div></div>';
     if (S.bulkStage === 'parsed' && S.bulkRows) {
       var rows = S.bulkRows, prev = rows.slice(0, 20);
       var table = '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:7px 9px">#</th><th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:left;padding:7px 9px">품종명/Pedigree</th><th style="text-align:center;padding:7px 9px">세대</th><th style="text-align:center;padding:7px 9px">반복</th><th style="text-align:center;padding:7px 9px">개체수</th></tr></thead><tbody>' +
@@ -3105,7 +3178,7 @@
       toast(fl.length + '장 저장 중…');
       var seq = Promise.resolve();
       Array.prototype.slice.call(fl).forEach(function (f, i) {
-        seq = seq.then(function () { return fileToScaledDataURL(f, 1400); }).then(function (url) { return photoPut({ id: 'ph' + Date.now() + '_' + i, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: t ? t.id : null, traitName: tn, orig: url, anno: null, createdAt: Date.now() }); });
+        seq = seq.then(function () { return preparePhoto(f); }).then(function (url) { return photoPut({ id: 'ph' + Date.now() + '_' + i, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: t ? t.id : null, traitName: tn, orig: url, anno: null, createdAt: Date.now() }); });
       });
       seq.then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; renderPhoto(); toast(fl.length + '장 저장됨'); }).catch(function () { toast('사진 처리 실패'); });
     }
@@ -3155,7 +3228,7 @@
         $('drUndo').onclick = function () { st.strokes.pop(); redraw(); };
         $('drClear').onclick = function () { st.strokes = []; redraw(); };
         $('drBack').onclick = function () { go('photo'); };
-        $('drSave').onclick = function () { var out = document.createElement('canvas'); out.width = cw; out.height = ch; var octx = out.getContext('2d'); octx.drawImage(bg, 0, 0); octx.drawImage(fg, 0, 0); p.anno = out.toDataURL('image/jpeg', 0.85); photoPut(p).then(function () { toast('주석 저장됨'); openPhotos(); }); };
+        $('drSave').onclick = function () { var out = document.createElement('canvas'); out.width = cw; out.height = ch; var octx = out.getContext('2d'); octx.drawImage(bg, 0, 0); octx.drawImage(fg, 0, 0); p.anno = out.toDataURL('image/jpeg', Math.max(0.85, photoQ().q)); photoPut(p).then(function () { toast('주석 저장됨'); openPhotos(); }); };
         markSel();
       }
       if (p.anno) { var ai = new Image(); ai.onload = function () { bctx.drawImage(ai, 0, 0, cw, ch); wire(); }; ai.onerror = wire; ai.src = p.anno; } else wire();
@@ -3416,6 +3489,16 @@
         ) +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">기기 ID: ' + esc(st.deviceId) + '</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">동기화 사용</div><div style="font-size:11px;color:var(--text-muted)">끄면 기기에만 저장됩니다 (홈에서도 전환 가능)</div></div><div class="sw' + (st.syncOn !== false ? ' on' : '') + '" id="sSyncOn"><div class="knob"></div></div></div>' +
+        '<div style="margin-top:18px"><div style="font-size:13px;font-weight:500">사진 화질</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">높일수록 선명하지만 저장 용량과 전송 시간이 늘어납니다</div>' +
+          '<div style="display:flex;gap:8px;margin-top:9px">' +
+            ['low', 'orig'].map(function (k) {
+              var on = ((st.photoQ || 'orig') === k), o = PHOTO_Q[k];
+              return '<button class="btn sPhotoQ" data-q="' + k + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px' + (on ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + o.name +
+                '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? '#3B6D11' : 'var(--text-muted)') + '">' + o.sub + '</span></button>';
+            }).join('') +
+          '</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:8px" id="sStore">기기 저장 사용량 확인 중…</div></div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">진동 피드백</div><div style="font-size:11px;color:var(--text-muted)">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>' +
         '<div style="display:flex;gap:10px;margin-top:16px">' +
           '<button class="btn" id="sPing" style="flex:1;height:46px;font-size:14px">연결 테스트</button>' +
@@ -3473,6 +3556,17 @@
         .catch(function () { toast('코드를 불러오지 못했습니다 · 온라인에서 한 번 실행해 주세요'); });
     };
     $('sSyncOn').onclick = function () { st.syncOn = (st.syncOn === false); this.classList.toggle('on', st.syncOn !== false); kvSet('settings', st).then(function () { toast(st.syncOn !== false ? '동기화 켜짐' : '동기화 꺼짐'); }); };
+    document.querySelectorAll('.sPhotoQ').forEach(function (b) {
+      b.onclick = function () { st.photoQ = b.getAttribute('data-q'); kvSet('settings', st).then(function () { renderSettings(); toast('사진 화질 · ' + PHOTO_Q[st.photoQ].name); }); };
+    });
+    if ($('sStore') && navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then(function (e) {
+        var el = $('sStore'); if (!el) return;
+        var used = (e.usage || 0) / 1048576, quota = (e.quota || 0) / 1048576;
+        el.textContent = '기기 저장 사용량 ' + (used > 1024 ? (used / 1024).toFixed(1) + 'GB' : used.toFixed(1) + 'MB') +
+          (quota ? ' / 사용 가능 ' + (quota > 1024 ? (quota / 1024).toFixed(1) + 'GB' : quota.toFixed(0) + 'MB') : '');
+      }).catch(function () {});
+    }
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     $('sGuide').onclick = function () { openGuide(); };
     $('sReset').onclick = async function () {
@@ -3917,7 +4011,7 @@
           lineKeyToId[(l.gen || '') + '|' + l.label + '|' + (l.rep || '')] = { gid: gid, id: id };
           return { id: id, label: l.label, pedigree: l.pedigree, rep: l.rep, block: l.block, zone: l.zone, row: Math.floor(li / 10) + 1, col: (li % 10) + 1, indivTotal: l.indivTotal, selected: !!l.selected };
         });
-        newGens.push({ id: gid, projId: projId, projName: projName, crop: '불러옴', color: '#639922', label: gl, prefix: (lines[0] && String(lines[0].label).split('-')[0]) || '', surveyDates: dlist.slice(), traits: JSON.parse(JSON.stringify(traits)), lines: lines });
+        newGens.push({ id: gid, projId: projId, projName: projName, crop: '', color: '#639922', label: gl, prefix: (lines[0] && String(lines[0].label).split('-')[0]) || '', surveyDates: dlist.slice(), traits: JSON.parse(JSON.stringify(traits)), lines: lines });
         madeGen++;
       });
       S.gens = S.gens.concat(newGens);
@@ -4157,6 +4251,12 @@
       S.gens = gens;
       if (mig) await kvSet('gens', gens);
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
+      // 사진 화질 단계 이름이 한 칸씩 올라가서, 예전에 골라 둔 값을 같은 화질로 옮긴다
+      if (S.settings.photoQv !== 3) {
+        // 단계가 '저화질 · 원본' 두 가지로 정리됨 — 예전에 고른 값을 옮긴다
+        S.settings.photoQ = (S.settings.photoQ === 'orig') ? 'orig' : (S.settings.photoQ ? 'low' : S.settings.photoQ);
+        S.settings.photoQv = 3; await kvSet('settings', S.settings);
+      }
       if (!S.settings.deviceId) S.settings.deviceId = 'dev-' + Math.random().toString(36).slice(2, 8);
       S.indivSel = await kvGet('indivSel') || {};
       S.folders = await kvGet('folders') || [];
