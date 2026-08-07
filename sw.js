@@ -1,6 +1,6 @@
 // Crop Memo Pro — service worker (network-first shell, offline fallback)
 // app.js 의 APP_VERSION 과 같은 값으로 맞춰 두면, 업데이트할 때 예전 캐시가 자동으로 정리됩니다
-const CACHE = 'cropmemo-26.8.7';
+const CACHE = 'cropmemo-26.8.8';
 const SHELL = [
   './', './index.html', './app.js', './icons.js', './styles.css', './native-bridge.js',
   './manifest.webmanifest',
@@ -48,7 +48,7 @@ self.addEventListener('fetch', (e) => {
   // cross-origin: leave to browser
   if (url.origin !== self.location.origin) return;
   // big lazy assets + static icons: cache-first (download once, then offline)
-  if (url.pathname.indexOf('/ocr/') !== -1 || url.pathname.indexOf('/pdf/') !== -1 || url.pathname.endsWith('xlsx.min.js') || url.pathname.indexOf('/icons/') !== -1) {
+  if (url.pathname.indexOf('/ocr/') !== -1 || url.pathname.indexOf('/pdf/') !== -1 || url.pathname.indexOf('/guide/') !== -1 || url.pathname.endsWith('xlsx.min.js') || url.pathname.indexOf('/icons/') !== -1) {
     e.respondWith(cacheFirst(req));
     return;
   }

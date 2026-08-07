@@ -4,8 +4,8 @@
   'use strict';
 
   // ===== 버전 =====
-  // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.7 = 2026년 8월 7일)
-  var APP_VERSION = '26.8.7';
+  // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
+  var APP_VERSION = '26.8.8';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -566,7 +566,24 @@
   }
 
   // ----- (선택) 실제 폴더로 쓰기 — File System Access API 지원 브라우저 -----
-  function fsaSupported() { return typeof window.showDirectoryPicker === 'function' && window.isSecureContext; }
+  // 폴더를 골라 저장할 수 있는 환경인지 (데스크톱 크롬·엣지 + 안드로이드 크롬 132 이상)
+  function fsaSupported() {
+    return typeof window.showDirectoryPicker === 'function' && window.isSecureContext && !window.CM_NATIVE;
+  }
+  // 고른 폴더 안에 하위 폴더를 만들 수 있는지 미리 확인.
+  // 안드로이드는 폴더 만들기가 막혀 있는 경우가 많아(NotAllowedError) 그때는 '평면 저장'으로 넘어간다.
+  async function backupSubdirOK(dir) {
+    try { await dir.getDirectoryHandle(BK_ROOT, { create: true }); return true; }
+    catch (e) { return false; }
+  }
+  // 폴더를 못 만드는 기기용 — 폴더 경로를 파일명 앞에 붙여 한 폴더에 나란히 저장한다
+  //   CropMemo/26 고추 시험/26년 고추 시교/26년 고추 시교_야장_2026-08-08.csv
+  //   → CropMemo_26 고추 시험_26년 고추 시교_야장_2026-08-08.csv
+  function flatBackupName(path) {
+    var segs = path.split('/'), file = segs.pop(), dirs = segs.slice(1);   // 맨 앞 CropMemo 는 접두어로 다시 붙인다
+    dirs.forEach(function (d) { if (file.indexOf(d + '_') === 0) file = file.slice(d.length + 1); });
+    return BK_ROOT + '_' + (dirs.length ? dirs.join('_') + '_' : '') + file;
+  }
   async function getBackupDir(forcePick) {
     var h = null;
     if (!forcePick) { try { h = await kvGet('backupDir'); } catch (e) { h = null; } }
@@ -583,7 +600,7 @@
     }
     return h;
   }
-  async function writeBackupToDir(root, files, onStep) {
+  async function writeBackupToDir(root, files, flat, onStep) {
     var cache = {};
     async function dirFor(path) {
       if (cache[path]) return cache[path];
@@ -592,12 +609,16 @@
       cache[path] = h; return h;
     }
     for (var i = 0; i < files.length; i++) {
-      var f = files[i], k = f.name.lastIndexOf('/');
-      var d = await dirFor(k < 0 ? '' : f.name.slice(0, k)), nm = k < 0 ? f.name : f.name.slice(k + 1);
+      var f = files[i], d, nm;
+      if (flat) { d = root; nm = flatBackupName(f.name); }
+      else {
+        var k = f.name.lastIndexOf('/');
+        d = await dirFor(k < 0 ? '' : f.name.slice(0, k)); nm = k < 0 ? f.name : f.name.slice(k + 1);
+      }
       var fh = await d.getFileHandle(nm, { create: true });
       var w = await fh.createWritable();
       await w.write(f.data); await w.close();
-      if (onStep && (i % 3 === 0)) onStep('폴더에 저장 중 ' + (i + 1) + '/' + files.length, 0.85 + (i / files.length) * 0.15);
+      if (onStep && (i % 3 === 0)) onStep((flat ? '폴더에 파일 저장 중 ' : '폴더에 저장 중 ') + (i + 1) + '/' + files.length, 0.85 + (i / files.length) * 0.15);
     }
   }
 
@@ -630,10 +651,12 @@
       '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 기기 백업</div>' +
       '<div class="ovl-msg">다운로드 폴더에 <b>' + BK_ROOT + '</b> 폴더를 만들고, <b>과제 모음</b>에 묶인 과제는 모음 폴더명으로, 묶이지 않은 과제는 과제명 폴더로 저장합니다.<br><span style="color:var(--text-muted)">과제 ' + ps.length + '개 · 야장 CSV · 라벨목록 CSV · 사진 jpg</span></div>' +
       '<div style="margin-top:10px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:132px;overflow:auto">' + shown + '</div>' +
-      (canDir ? '' : '<div class="ovl-msg" style="margin-top:10px;color:var(--amber-ink)">폰 브라우저는 앱이 폴더를 직접 만들 수 없어, 위 폴더 구조를 그대로 담은 <b>ZIP 파일 하나</b>를 다운로드 폴더에 저장합니다. 파일을 눌러 <b>압축 풀기</b>를 하면 폴더가 그대로 만들어집니다.</div>') +
+      (canDir
+        ? '<div class="ovl-msg" style="margin-top:10px"><b>폴더에 저장</b> — 저장할 폴더를 고릅니다. 폴더를 만들 수 없는 기기(안드로이드)에서는 <b>고른 폴더에 파일을 하나씩</b> 저장하고, 파일명 앞에 <b>모음·과제명</b>을 붙여 구분합니다.<br><b>ZIP 저장</b> — 위 폴더 구조를 그대로 담은 압축 파일 하나를 다운로드 폴더에 저장합니다.</div>'
+        : '<div class="ovl-msg" style="margin-top:10px;color:var(--amber-ink)">이 브라우저는 폴더를 고를 수 없어, 위 폴더 구조를 그대로 담은 <b>ZIP 파일 하나</b>를 다운로드 폴더에 저장합니다. 파일을 눌러 <b>압축 풀기</b>를 하면 폴더가 그대로 만들어집니다.</div>') +
       '<div class="ovl-btns"><button class="btn" id="bkCancel">취소</button>' +
       (canDir
-        ? '<button class="btn" id="bkZip">ZIP 저장</button><button class="btn primary" id="bkDir">폴더에 저장</button>'
+        ? '<button class="btn" id="bkZip">ZIP 저장</button><button class="btn primary" id="bkDir">' + ico('folder', '#fff', 16) + ' 폴더에 저장</button>'
         : '<button class="btn primary" id="bkZip">' + ico('download', '#fff', 16) + ' 백업 시작</button>') +
       '</div>'
     );
@@ -643,10 +666,15 @@
   }
 
   async function runBackup(toDir) {
-    var dir = null;
+    var dir = null, flat = false;
     if (toDir) {
       try { dir = await getBackupDir(false); }
-      catch (e) { toast('폴더 선택이 취소되었습니다'); return; }
+      catch (e) {
+        if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) { toast('폴더 선택이 취소되었습니다'); return; }
+        dir = null;   // 이 기기에서 폴더 선택을 못 쓰면 ZIP으로
+      }
+      // 하위 폴더를 만들 수 없는 기기(안드로이드 등)면 고른 폴더에 파일을 하나씩 나란히 저장한다
+      if (dir) flat = !(await backupSubdirOK(dir));
     }
     backupProgress('자료를 모으는 중…');
     await bkYield();
@@ -654,9 +682,22 @@
       var b = await buildBackupFiles(bkStep);
       if (!b || b.files.length <= 1) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
       if (dir) {
-        await writeBackupToDir(dir, b.files, bkStep);
+        try {
+          await writeBackupToDir(dir, b.files, flat, bkStep);
+        } catch (we) {
+          // 쓰는 도중 막히면(권한·플랫폼 제한) 모아둔 자료를 그대로 ZIP으로 저장
+          try { await kvSet('backupDir', null); } catch (e2) {}
+          bkStep('폴더에 저장할 수 없어 ZIP으로 저장합니다…', 0.92);
+          await bkYield();
+          downloadBlob(makeZipBlob(b.files), BK_ROOT + '_백업_' + b.stamp + '.zip');
+          closeOverlay();
+          toast('폴더 저장이 막혀 ZIP으로 저장했습니다 · 파일 ' + b.files.length + '개');
+          S.lastBackup = Date.now();
+          kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+          return;
+        }
         closeOverlay();
-        toast('백업 완료 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
+        toast((flat ? '선택한 폴더에 파일 ' : '백업 완료 · 과제 ' + b.projects + '개 · 파일 ') + b.files.length + (flat ? '개 저장됨' : '개'));
       } else {
         bkStep('압축하는 중…\n파일 ' + b.files.length + '개 · ' + bkSize(b.bytes), 0.92);
         await bkYield();
@@ -671,7 +712,10 @@
       kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
     } catch (e) {
       closeOverlay();
-      toast('백업 실패 · ' + ((e && e.message) || '용량이 너무 클 수 있습니다'));
+      var m = (e && e.name === 'QuotaExceededError') ? '기기 저장 공간이 부족합니다'
+            : (e && e.name === 'NotAllowedError') ? '저장 권한이 없습니다 · 다시 시도해 주세요'
+            : '자료가 너무 많을 수 있습니다';
+      toast('백업 실패 · ' + m);
     }
   }
 
@@ -844,7 +888,7 @@
       }
     }
     return tabs + bodyHtml +
-      '<label style="font-size:12px;color:var(--text-secondary);display:block;margin:16px 0 6px">포장 / 구역</label><input class="ein" id="wZone" value="' + esc(w.zone) + '">' +
+      '<label style="font-size:12px;color:var(--text-secondary);display:block;margin:16px 0 6px">필드 / 구역</label><input class="ein" id="wZone" value="' + esc(w.zone) + '">' +
       '<div class="card" style="margin-top:14px"><div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:500">반복 배치 (RCBD)</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">같은 라벨번호를 반복 수만큼 배치 · 분산분석·유전력에 필요</div></div><div class="sw' + (w.rcbd ? ' on' : '') + '" id="wRcbd"><div class="knob"></div></div></div>' + reps + '</div>';
   }
   function wizFileGens(w) { var out = []; (w.rows || []).forEach(function (r) { if (r.gen && out.indexOf(r.gen) < 0) out.push(r.gen); }); return out; }
@@ -1103,7 +1147,7 @@
     var avail = GEN_ORDER.concat(S.customGens || []).filter(function (x, i, arr) { return used.indexOf(x) < 0 && arr.indexOf(x) === i; }).sort(byGen);
     openOverlay(
       '<div class="ovl-title">세대 추가</div>' +
-      '<div class="ovl-msg">이 과제에 추가할 세대를 고르세요. 형질세트와 포장 정보는 <b>' + esc(src.label) + '</b>에서 복사됩니다.</div>' +
+      '<div class="ovl-msg">이 과제에 추가할 세대를 고르세요. 형질세트와 필드 정보는 <b>' + esc(src.label) + '</b>에서 복사됩니다.</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">' + avail.map(function (x) { return '<button class="pill agchip" data-g="' + x + '">' + x + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(x) + '</span></button>'; }).join('') + '<button class="pill" id="agCustom" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div>' +
       '<div style="display:flex;gap:10px;align-items:center;margin-top:14px"><span style="font-size:12px;color:var(--text-secondary)">라벨번호 수</span><input class="ein" id="agN" type="number" value="' + (function () { var u = {}; src.lines.forEach(function (l) { u[l.label] = 1; }); return Object.keys(u).length; })() + '" style="height:40px;width:96px;text-align:center"></div>' +
       '<div class="ovl-btns"><button class="btn" id="agCancel">취소</button><button class="btn primary" id="agOk">추가</button></div>'
@@ -1196,7 +1240,7 @@
           var on = c.name === S.geCrop;
           return '<button class="pill gecrop' + (on ? ' on' : '') + '" data-c="' + esc(c.name) + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';margin-right:5px"></span>' + esc(c.name) + '</button>';
         }).join('') + '<button class="pill" id="geCropAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div>' +
-        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">포장 / 구역</label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
+        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">필드 / 구역</label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
         genBar +
         // traits
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개 <span style="color:var(--text-muted);font-weight:400">· ' + esc(g.label) + '</span></span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
@@ -3365,7 +3409,9 @@
         '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
         '<div style="font-size:13px;font-weight:600;margin-bottom:6px">데이터</div>' +
         '<div style="font-size:12px;color:var(--text-secondary)">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + '</div>' +
-        '<button class="btn" id="sReset" style="width:100%;height:44px;font-size:13px;margin-top:12px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
+        '<button class="btn" id="sGuide" style="width:100%;height:48px;font-size:14px;margin-top:18px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('bulb', 'var(--text-primary)', 18) + ' 사용 가이드 다시 보기</button>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">앱 화면을 순서대로 보여주는 첫 실행 안내입니다. 언제든 다시 볼 수 있습니다.</div>' +
+        '<button class="btn" id="sReset" style="width:100%;height:44px;font-size:13px;margin-top:18px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:18px;line-height:1.7">Crop Memo Pro · 오프라인 우선 PWA<br>현장에서 인터넷 없이 저장되고, 연결되면 Google Sheets로 동기화됩니다.</div>' +
       '</div>';
     document.querySelectorAll('.sProv').forEach(function (b) { b.onclick = function () { st.provider = b.getAttribute('data-v'); kvSet('settings', st).then(function () { renderSettings(); toast(st.provider === 'od' ? 'OneDrive 저장으로 전환' : '구글 드라이브 저장으로 전환'); }); }; });
@@ -3390,11 +3436,177 @@
     };
     $('sSyncOn').onclick = function () { st.syncOn = (st.syncOn === false); this.classList.toggle('on', st.syncOn !== false); kvSet('settings', st).then(function () { toast(st.syncOn !== false ? '동기화 켜짐' : '동기화 꺼짐'); }); };
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
+    $('sGuide').onclick = function () { openGuide(); };
     $('sReset').onclick = async function () {
       if (!confirm('모든 로컬 데이터를 삭제할까요? (되돌릴 수 없습니다)')) return;
       indexedDB.deleteDatabase(DB_NAME);
       setTimeout(function () { location.reload(); }, 300);
     };
+  }
+
+
+  /* ==========================================================
+   * 사용 가이드 — 첫 실행 시 뜨는 안내 팝업 (실제 앱 화면 캡처)
+   *   · 이미지: guide/*.jpg (가이드를 열 때만 불러오고, 한 번 본 뒤에는 오프라인에서도 보임)
+   *   · 첫 실행에 자동으로 뜨고, 마지막 장의 '다음부터 이 안내를 보지 않기'로 끕니다
+   *   · 설정 맨 아래 '사용 가이드 다시 보기'로 언제든 다시 열 수 있습니다
+   * ========================================================== */
+  // 강조 상자 좌표 — 화면(412x892) 기준 백분율
+  var GBOX = {
+    hNew:     { x: 77.2, y: 51.5, w: 19.4, h: 3.3 },
+    bkCard:   { x: 3.4,  y: 15.5, w: 93.2, h: 6.7 },
+    cCard:    { x: 2.9,  y: 8.6,  w: 94.2, h: 7.2 },
+    cPills:   { x: 1.5,  y: 21.8, w: 97,   h: 4.8 },
+    cMap:     { x: 78.4, y: 0.9,  w: 18.7, h: 3.3 },
+    cQuick:   { x: 1.5,  y: 58.1, w: 97,   h: 5.4 },
+    cMapWrap: { x: 3.4,  y: 8.8,  w: 93.2, h: 30.8 },
+    eCsv:     { x: 3.9,  y: 26.8, w: 92.2, h: 5.8 },
+    eZip:     { x: 3.9,  y: 45.5, w: 92.2, h: 5.8 },
+    sUrl:     { x: 3.9,  y: 19.5, w: 92.2, h: 4.9 },
+    sSyncOn:  { x: 83.4, y: 37.6, w: 13,   h: 4.2 }
+  };
+  function gc(key, n, side, label) { var b = GBOX[key]; return { x: b.x, y: b.y, w: b.w, h: b.h, n: n, side: side || 'left', label: label || '' }; }
+
+  function guideSlides() {
+    return [
+      { img: '01-home', chap: '시작', title: '반갑습니다. Crop Memo Pro 사용 가이드 입니다.',
+        body: '인터넷이 없는 필드에서도 야장을 기록/분석하고, 온라인시 동기화를 통해 자동 전송 가능합니다.',
+        note: '설치 직후에는 둘러보기용 예시 과제가 하나 들어 있습니다. 필요 없으면 지우고 새로 만드세요.' },
+
+      { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기',
+        body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽의 <b>+ 새 과제</b>를 누릅니다.',
+        note: '생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
+        calls: [gc('hNew', 1, 'right', '여기를 누르세요')] },
+
+      { img: '03-wizard1', chap: '과제 생성 3단계 · 1 / 3', title: '① 과제 정보',
+        body: '작물을 고르고 <b>과제명</b>과 <b>라벨 접두어</b>를 입력합니다. 목록에 없는 작물은 <b>+ 작물 추가</b>로 만들 수 있습니다.' },
+
+      { img: '04-wizard2', chap: '과제 생성 3단계 · 2 / 3', title: '② 세대 · 라벨',
+        body: 'F1~F9 세대를 <b>여러 개 한꺼번에</b> 고를 수 있습니다. 조합·계통 수, 계통당 개체 수, RCBD 반복 배치를 여기서 정합니다.' },
+
+      { img: '05-wizard3', chap: '과제 생성 3단계 · 3 / 3', title: '③ 형질세트',
+        body: '작물별 기본 형질이 미리 들어 있습니다. <b>필요 없는 항목은 스위치를 끄고</b>, 없는 형질은 <b>+ 형질 추가</b>로 넣으세요.' },
+
+      { img: '06-bulkpreview', chap: '라벨 등록', title: '엑셀 · CSV로 라벨 한 번에',
+        body: '엑셀·CSV·PDF·종이 표 사진을 넣으면 <b>라벨번호 · 품종명 · 세대 · 반복 · 개체수</b>를 읽어 미리보기로 보여줍니다. 확인한 뒤 등록하면 계통이 한 번에 채워집니다.' },
+
+      { img: '07-traitload', chap: '형질세트', title: '형질 불러오기',
+        body: '이미 만든 과제의 <b>형질세트를 그대로 가져옵니다.</b> 매번 같은 조사 항목을 다시 만들 필요가 없습니다.' },
+
+      { img: '08-genedit', chap: '과제 수정', title: '계통 표에서 직접 고치기',
+        body: '홈에서 <b>연필</b>을 누르면 라벨번호·품종명·세대·반복·개체수를 표에서 바로 수정할 수 있습니다. 세대 추가와 형질 편집도 여기서 합니다.' },
+
+      { img: '09-collect', chap: '야장 수집', title: '조사 화면 읽는 법',
+        body: '<b>①</b> 지금 조사 중인 라벨번호·개체 (별을 누르면 개체/라벨 번호 선발)<br><b>②</b> 형질 탭 — 눌러서 전환<br><b>③</b> 필드맵 — 필드 배치도 열기',
+        calls: [gc('cCard', 1), gc('cPills', 2), gc('cMap', 3, 'right')] },
+
+      { img: '11-traitedit', chap: '야장 수집', title: '형질 수정 · 추가',
+        body: '형질세트 편집에서 <b>이름 · 유형 · 단위</b>를 바꾸고 순서 이동·삭제·추가를 합니다. <b>시계열</b>을 켜면 조사일마다 값이 따로 쌓입니다.' },
+
+      { img: '09-collect', chap: '야장 수집', title: '값 입력과 화면 넘기기',
+        body: '값은 <b>입력하는 즉시 기기에 저장</b>됩니다.<br>화면을 <b>좌우로 밀면 개체</b>, <b>위아래로 밀면 라벨번호</b>가 넘어갑니다.',
+        swipe: true },
+
+      { img: '09-collect', chap: '기록 도구', title: '사진 · 그리기 · 음성',
+        body: '조사 화면 아래 세 버튼입니다. 개체에 <b>사진</b>을 붙이고, 그 위에 <b>표시를 그리고</b>, 손이 바쁠 땐 <b>음성</b>으로 비고를 남깁니다.',
+        note: "사진은 '과제명_라벨번호_개체번호_형질_일자'로 기록되고, 모음 폴더에 묶인 과제는 모음 폴더 아래에 저장됩니다.",
+        calls: [gc('cQuick', 1)] },
+
+      { img: '13-map', chap: '필드맵', title: '필드 배치도 보기',
+        body: '필드 배치를 그대로 봅니다. <b>큰 별 = 라벨 번호 선발</b>, <b>작은 별 = 개체 선발</b>이고 <b>선발만 보기</b>로 걸러 볼 수 있습니다. 칸을 누르면 그 라벨번호로 바로 이동합니다.',
+        calls: [gc('cMapWrap', 1)] },
+
+      { img: '14-export', chap: '내보내기', title: '현재 선택 과제 CSV · 사진 내보내기',
+        body: '<b>①</b> CSV — 엑셀에서 바로 열리는 롱포맷(과제의 모든 세대 한 파일)<br><b>②</b> 사진 ZIP — <b>CropMemo / 과제명 /</b> 폴더 구조 그대로',
+        calls: [gc('eCsv', 1), gc('eZip', 2)] },
+
+      { img: '15-settings', chap: '설정', title: '동기화 연결',
+        body: 'Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 구글 시트·드라이브로 자동 전송됩니다. 오프라인에서는 기기에 쌓였다가 연결되는 순간 한 번에 올라갑니다.',
+        calls: [gc('sUrl', 1), gc('sSyncOn', 2, 'right')] },
+
+      { img: '16-backup', chap: '기기 백업', title: '내 기기에 조사 자료 전체 백업 하기',
+        body: '홈의 <b>기기 백업</b>을 누르면 다운로드 폴더의 <b>CropMemo</b> 폴더에 모든 과제의 야장 CSV·라벨목록·사진이 저장됩니다. 폰에서는 폴더 구조를 그대로 담은 <b>ZIP 한 개</b>로 저장되니 압축만 풀면 됩니다.' },
+
+      { last: true, chap: '', title: 'Crop Memo Pro!',
+        body: '이제 첫 과제를 만들고, 동기화/백업을 수행 해보세요.<br>인터넷이 끊겨도 입력한 값은 기기에 남지만, 안전을 위해 데이터 백업 하시기 바랍니다.' }
+    ];
+  }
+
+  function guideCallHTML(c) {
+    var box = 'left:' + c.x + '%;top:' + c.y + '%;width:' + c.w + '%;height:' + c.h + '%';
+    var h = '<div class="ghl" style="' + box + '"></div>';
+    var bl = (c.side === 'right') ? ('left:calc(' + (c.x + c.w) + '% - 4px)') : ('left:calc(' + c.x + '% - 11px)');
+    h += '<div class="gbadge" style="' + bl + ';top:calc(' + c.y + '% - 9px)">' + c.n + '</div>';
+    if (c.label) {
+      var tl = (c.side === 'right') ? ('right:calc(' + (100 - c.x) + '% + 8px)') : ('left:calc(' + (c.x + c.w) + '% + 8px)');
+      h += '<div class="gtip" style="' + tl + ';top:calc(' + c.y + '% + ' + (c.h / 2) + '% - 10px)">' + esc(c.label) + '</div>';
+    }
+    return h;
+  }
+
+  function openGuide() {
+    S.guide = { i: 0, hide: true, slides: guideSlides() };
+    var o = document.getElementById('guideOvl');
+    if (!o) { o = document.createElement('div'); o.id = 'guideOvl'; o.className = 'govl'; document.body.appendChild(o); }
+    renderGuide();
+  }
+  function closeGuide(markSeen) {
+    var o = document.getElementById('guideOvl'); if (o) o.remove();
+    S.guide = null;
+    if (markSeen !== false) kvSet('guideSeen', true);
+  }
+  function renderGuide() {
+    var G = S.guide; if (!G) return;
+    var o = document.getElementById('guideOvl'); if (!o) return;
+    var s = G.slides[G.i], n = G.slides.length;
+    var mid = s.last
+      ? '<div class="gend"><div class="gendic">' + ico('circle-check', '#fff', 40) + '</div>' +
+        '<div class="gendttl">준비 완료</div>' +
+        '<div class="gendmsg">언제든 <b>설정 → 사용 가이드 다시 보기</b>에서<br>이 안내를 다시 볼 수 있습니다.</div></div>'
+      : '<div class="gshot"><div class="gframe"><img src="guide/' + s.img + '.jpg" alt="">' +
+        (s.calls || []).map(guideCallHTML).join('') +
+        (s.swipe ? '<div class="gswh">◀ 개체 ▶</div><div class="gswv">▲ 라벨번호 ▼</div>' : '') +
+        '</div></div>';
+    var dots = G.slides.map(function (x, k) { return '<div class="gdot' + (k === G.i ? ' on' : '') + '" data-k="' + k + '"></div>'; }).join('');
+    var foot = s.last
+      ? '<div class="gfoot">' +
+          '<div class="gchk' + (G.hide ? ' on' : '') + '" id="gChk"><div class="gbox">' + (G.hide ? ico('check', '#fff', 12) : '') + '</div>다음부터 이 안내를 보지 않기</div>' +
+          '<div class="gbtns"><button class="btn gghost" id="gPrev">이전</button><button class="btn primary" id="gDone">시작하기</button></div>' +
+        '</div>'
+      : '<div class="gfoot"><div class="gdots">' + dots + '</div><div class="gbtns">' +
+          (G.i > 0 ? '<button class="btn gghost" id="gPrev">이전</button>' : '') +
+          '<button class="btn primary" id="gNext">다음</button></div></div>';
+
+    o.innerHTML = '<div class="gcard">' +
+      '<div class="ghead">' + (s.chap ? '<span class="gchip">' + esc(s.chap) + '</span>' : '') +
+        '<span class="gstep">' + (G.i + 1) + ' / ' + n + '</span>' +
+        '<button class="gx" id="gClose">' + ico('x', 'var(--text-secondary)', 16) + '</button></div>' +
+      mid +
+      '<div class="gtxt"><div class="gtitle">' + esc(s.title) + '</div><div class="gbody">' + s.body + '</div>' +
+        (s.note ? '<div class="gnote">' + ico('info-circle', '#3B6D11', 13) + '<span>' + esc(s.note) + '</span></div>' : '') + '</div>' +
+      foot + '</div>';
+
+    if ($('gNext')) $('gNext').onclick = function () { guideGo(1); };
+    if ($('gPrev')) $('gPrev').onclick = function () { guideGo(-1); };
+    if ($('gChk')) $('gChk').onclick = function () { G.hide = !G.hide; renderGuide(); };
+    if ($('gDone')) $('gDone').onclick = function () { closeGuide(false); kvSet('guideSeen', !!G.hide); toast(G.hide ? '가이드를 닫았습니다 · 설정에서 다시 볼 수 있어요' : '다음 실행 때 다시 안내합니다'); };
+    $('gClose').onclick = function () { closeGuide(true); };
+    o.querySelectorAll('.gdot').forEach(function (d) { d.onclick = function () { G.i = +d.getAttribute('data-k'); renderGuide(); }; });
+    // 좌우 스와이프로 넘기기
+    var sx = null, sy = null;
+    o.onpointerdown = function (e) { sx = e.clientX; sy = e.clientY; };
+    o.onpointerup = function (e) {
+      if (sx == null) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy; sx = null;
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) guideGo(dx < 0 ? 1 : -1);
+    };
+  }
+  function guideGo(d) {
+    var G = S.guide; if (!G) return;
+    var ni = G.i + d;
+    if (ni < 0 || ni >= G.slides.length) return;
+    G.i = ni; haptic(10); renderGuide();
+    var c = document.querySelector('#guideOvl .gcard'); if (c) c.scrollTop = 0;
   }
 
   // ---------- net ----------
@@ -3418,6 +3630,8 @@
     window.addEventListener('cm-nav', function () { armBack(1); });
   }
   function onBack() {
+    // 0) 사용 가이드가 떠 있으면 가이드부터 닫기
+    if (document.getElementById('guideOvl')) { closeGuide(true); return 'ok'; }
     // 1) 팝업이 열려 있으면 팝업만 닫기
     if (document.getElementById('ovl')) { closeOverlay(); return 'ok'; }
     // 2) 형질세트 편집 중이면 편집만 종료
@@ -3489,6 +3703,8 @@
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
       go('home');
       setupBack();
+      // 첫 실행이면 사용 가이드를 띄운다 (마지막 장에서 '다음부터 보지 않기'로 끌 수 있음)
+      if (!(await kvGet('guideSeen'))) setTimeout(openGuide, 450);
       if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl) trySync(true);
     } catch (err) { showBootError(err); }
   }

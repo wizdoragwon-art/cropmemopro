@@ -144,3 +144,48 @@ a{color:var(--green-d)}
   #cQuick .btn { height: 37px !important; }
   #cNav .btn { height: 40px !important; }
 }
+
+/* ===== 사용 가이드 팝업 (첫 실행 안내) ===== */
+.govl{position:fixed;inset:0;background:rgba(18,22,16,.62);display:flex;align-items:center;justify-content:center;z-index:200;padding:13px;
+  padding-top:calc(13px + env(safe-area-inset-top));padding-bottom:calc(13px + env(safe-area-inset-bottom))}
+.gcard{background:var(--surface-2);border-radius:18px;width:100%;max-width:460px;height:100%;display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 14px 36px rgba(0,0,0,.32)}
+.ghead{display:flex;align-items:center;gap:8px;padding:12px 14px 9px;border-bottom:0.5px solid var(--border);flex:0 0 auto}
+.gchip{font-size:10.5px;font-weight:600;color:var(--green-ink);background:var(--green-t);border-radius:11px;padding:4px 9px}
+.gstep{margin-left:auto;font-size:11px;color:var(--text-muted)}
+.gx{width:28px;height:28px;border:0;background:var(--surface-1);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.gshot{flex:1 1 auto;min-height:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:12px;overflow:hidden}
+.gframe{position:relative;height:100%;aspect-ratio:412/892;border-radius:11px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.16);background:#fff}
+.gframe img{width:100%;height:100%;display:block;object-fit:cover;object-position:top}
+.ghl{position:absolute;border:2.5px solid var(--green);border-radius:9px;animation:gpulse 1.7s ease-in-out infinite}
+@keyframes gpulse{0%,100%{box-shadow:0 0 0 3px rgba(99,153,34,.20)}50%{box-shadow:0 0 0 7px rgba(99,153,34,.07)}}
+.gbadge{position:absolute;width:21px;height:21px;border-radius:50%;background:var(--green);color:#fff;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.28)}
+.gtip{position:absolute;background:var(--green-ink);color:#fff;font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:8px;white-space:nowrap;
+  box-shadow:0 3px 9px rgba(0,0,0,.3)}
+.gswh,.gswv{position:absolute;left:50%;transform:translate(-50%,-50%);color:#fff;font-size:11.5px;font-weight:700;border-radius:20px;padding:5px 11px;white-space:nowrap}
+.gswh{background:rgba(39,80,10,.86);top:40%}
+.gswv{background:rgba(176,114,26,.9);top:56%}
+.gend{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:var(--green-t);padding:20px}
+.gendic{width:74px;height:74px;border-radius:21px;background:var(--green);display:flex;align-items:center;justify-content:center}
+.gtxt{flex:0 0 auto;padding:13px 16px 4px}
+.gtitle{font-size:17px;font-weight:700;margin-bottom:6px}
+.gbody{font-size:12.8px;line-height:1.72;color:var(--text-secondary)}
+.gbody b{color:var(--text-primary)}
+.gnote{display:flex;gap:7px;align-items:flex-start;margin-top:10px;padding:9px 11px;background:var(--green-t);border:0.5px solid #CFE0BA;
+  border-radius:9px;font-size:11.5px;line-height:1.6;color:var(--green-ink)}
+.gnote i{flex:0 0 auto;margin-top:1px}
+.gendttl{font-size:19px;font-weight:700;color:var(--green-ink);margin-top:-4px}
+.gendmsg{font-size:12.5px;color:var(--green-ink);text-align:center;line-height:1.7;opacity:.9}
+.gfoot{flex:0 0 auto;padding:12px 14px 14px}
+.gdots{display:flex;gap:4px;justify-content:center;margin-bottom:11px;flex-wrap:wrap}
+.gdot{width:6px;height:6px;border-radius:50%;background:var(--border-strong);cursor:pointer}
+.gdot.on{background:var(--green);width:16px;border-radius:3px}
+.gbtns{display:flex;gap:9px}
+.gbtns .btn{flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:5px}
+.gbtns .gghost{flex:0 0 84px;background:var(--surface-1)}
+.gchk{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-secondary);padding:11px 12px;background:var(--surface-1);
+  border-radius:10px;margin-bottom:10px;cursor:pointer;user-select:none}
+.gbox{width:19px;height:19px;border-radius:5px;border:1.5px solid var(--border-strong);background:var(--surface-2);flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center}
+.gchk.on .gbox{background:var(--green);border-color:var(--green-d)}
