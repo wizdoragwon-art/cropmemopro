@@ -64,13 +64,25 @@
   function crc32(buf) { if (!_crcT) { _crcT = []; for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; _crcT[n] = c >>> 0; } } var crc = 0 ^ (-1); for (var i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ _crcT[(crc ^ buf[i]) & 0xFF]; return (crc ^ (-1)) >>> 0; }
   function zipStrBytes(s) { var e = unescape(encodeURIComponent(s)), a = new Uint8Array(e.length); for (var i = 0; i < e.length; i++) a[i] = e.charCodeAt(i) & 0xff; return a; }
   function zipNum(n, b) { var a = new Uint8Array(b); for (var i = 0; i < b; i++) { a[i] = n & 0xff; n >>>= 8; } return a; }
+  // ZIP 안의 파일 수정날짜 — MS-DOS 형식(2바이트 시간 + 2바이트 날짜).
+  // 예전에는 0으로 두어 압축을 풀면 1980-00-00 으로 보였다.
+  function dosDT(ts) {
+    var d = new Date(ts || Date.now());
+    var y = d.getFullYear();
+    if (y < 1980) { d = new Date(1980, 0, 1); y = 1980; }
+    return {
+      t: ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff,
+      d: (((y - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xffff
+    };
+  }
   function zipParts(files) {
     var chunks = [], central = [], offset = 0;
     files.forEach(function (f) {
       var name = zipStrBytes(f.name), crc = crc32(f.data), size = f.data.length;
-      var lh = [].concat([0x50, 0x4b, 0x03, 0x04], [20, 0], [0, 8], [0, 0], [0, 0], [0, 0], Array.prototype.slice.call(zipNum(crc, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(name.length, 2)), [0, 0]);
+      var dt = dosDT(f.mtime), T = Array.prototype.slice.call(zipNum(dt.t, 2)), D = Array.prototype.slice.call(zipNum(dt.d, 2));
+      var lh = [].concat([0x50, 0x4b, 0x03, 0x04], [20, 0], [0, 8], [0, 0], T, D, Array.prototype.slice.call(zipNum(crc, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(name.length, 2)), [0, 0]);
       var lhu = new Uint8Array(lh); chunks.push(lhu, name, f.data);
-      var ch = [].concat([0x50, 0x4b, 0x01, 0x02], [20, 0], [20, 0], [0, 8], [0, 0], [0, 0], [0, 0], Array.prototype.slice.call(zipNum(crc, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(name.length, 2)), [0, 0], [0, 0], [0, 0], [0, 0], Array.prototype.slice.call(zipNum(0, 4)), Array.prototype.slice.call(zipNum(offset, 4)));
+      var ch = [].concat([0x50, 0x4b, 0x01, 0x02], [20, 0], [20, 0], [0, 8], [0, 0], T, D, Array.prototype.slice.call(zipNum(crc, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(size, 4)), Array.prototype.slice.call(zipNum(name.length, 2)), [0, 0], [0, 0], [0, 0], [0, 0], Array.prototype.slice.call(zipNum(0, 4)), Array.prototype.slice.call(zipNum(offset, 4)));
       central.push(new Uint8Array(ch), name);
       offset += lhu.length + name.length + f.data.length;
     });
@@ -561,13 +573,14 @@
       var p = ps[i], dir = backupPathOf(p);
       if (onStep) onStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + ps.length + '\n' + p.name, (i / ps.length) * 0.85);
       await bkYield();
+      var now = Date.now();
       var built = await buildCSV(p);
-      if (built) { files.push({ name: dir + safeName(p.name) + '_야장_' + stamp + '.csv', data: txtBytes(built.csv) }); nCsv++; }
+      if (built) { files.push({ name: dir + safeName(p.name) + '_야장_' + stamp + '.csv', data: txtBytes(built.csv), mtime: now }); nCsv++; }
       var lab = buildLabelCSV(p);
-      if (lab) { files.push({ name: dir + safeName(p.name) + '_라벨목록_' + stamp + '.csv', data: txtBytes(lab) }); nCsv++; }
+      if (lab) { files.push({ name: dir + safeName(p.name) + '_라벨목록_' + stamp + '.csv', data: txtBytes(lab), mtime: now }); nCsv++; }
       var imgs = await collectProjImages(p);
       for (var j = 0; j < imgs.length; j++) {
-        try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url) }); nImg++; } catch (e) {}
+        try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts }); nImg++; } catch (e) {}
         imgs[j].url = null;   // 데이터URL 원본은 바로 놓아준다(메모리 절약)
       }
       summary.push('· ' + dir + '\r\n    야장 ' + (built ? built.rows : 0) + '행 · 라벨 ' + p.lines + '개 · 사진 ' + imgs.length + '장');
@@ -577,7 +590,7 @@
       '\r\n과제 ' + ps.length + '개 · 파일 ' + files.length + '개 · ' + bkSize(bytes) +
       '\r\n\r\n[폴더 구조]\r\n' + summary.join('\r\n') +
       '\r\n\r\nCSV는 UTF-8(BOM) 롱포맷이라 엑셀에서 바로 열립니다.\r\n';
-    files.unshift({ name: BK_ROOT + '/백업정보.txt', data: txtBytes(info) });
+    files.unshift({ name: BK_ROOT + '/백업정보.txt', data: txtBytes(info), mtime: Date.now() });
     return { files: files, projects: ps.length, csv: nCsv, img: nImg, bytes: bytes, stamp: stamp };
   }
 
@@ -588,9 +601,11 @@
   }
   // 고른 폴더 안에 하위 폴더를 만들 수 있는지 미리 확인.
   // 안드로이드는 폴더 만들기가 막혀 있는 경우가 많아(NotAllowedError) 그때는 '평면 저장'으로 넘어간다.
+  var BK_SUBDIR_ERR = '';
   async function backupSubdirOK(dir) {
+    BK_SUBDIR_ERR = '';
     try { await dir.getDirectoryHandle(BK_ROOT, { create: true }); return true; }
-    catch (e) { return false; }
+    catch (e) { BK_SUBDIR_ERR = (e && e.name) || '오류'; return false; }
   }
   // 폴더를 못 만드는 기기용 — 폴더 경로를 파일명 앞에 붙여 한 폴더에 나란히 저장한다
   //   CropMemo/26 고추 시험/26년 고추 시교/26년 고추 시교_야장_2026-08-08.csv
@@ -600,16 +615,30 @@
     dirs.forEach(function (d) { if (file.indexOf(d + '_') === 0) file = file.slice(d.length + 1); });
     return BK_ROOT + '_' + (dirs.length ? dirs.join('_') + '_' : '') + file;
   }
+  // 폴더 핸들의 쓰기 권한 상태 — 'granted' / 'prompt' / 'denied'
+  async function dirPerm(h, ask) {
+    try {
+      var q = await h.queryPermission({ mode: 'readwrite' });
+      if (q !== 'granted' && ask) q = await h.requestPermission({ mode: 'readwrite' });
+      return q;
+    } catch (e) { return 'denied'; }
+  }
+  // 쓰기 권한이 없을 때 — 사용자가 직접 누르게 해서 권한 요청 (브라우저는 '방금 누른' 동작에서만 권한창을 띄운다)
+  function askWritePermPopup() {
+    return new Promise(function (resolve) {
+      openOverlay(
+        '<div class="ovl-title">' + ico('lock', '#3B6D11', 18) + ' 저장 권한 허용</div>' +
+        '<div class="ovl-msg">고른 폴더에 <b>쓰기 권한</b>이 아직 없습니다.<br>아래 <b>권한 허용</b>을 누르고 브라우저 팝업에서 <b>허용</b>을 선택하면 폴더에 그대로 저장됩니다.<br><span style="color:var(--text-muted)">허용하지 않으면 ZIP 파일로 저장합니다.</span></div>' +
+        '<div class="ovl-btns"><button class="btn" id="pmSkip">ZIP으로 저장</button><button class="btn primary" id="pmOk">' + ico('lock', '#fff', 15) + ' 권한 허용</button></div>'
+      );
+      $('pmSkip').onclick = function () { closeOverlay(); resolve(false); };
+      $('pmOk').onclick = function () { closeOverlay(); resolve(true); };
+    });
+  }
   async function getBackupDir(forcePick) {
     var h = null;
     if (!forcePick) { try { h = await kvGet('backupDir'); } catch (e) { h = null; } }
-    if (h) {
-      try {
-        var q = await h.queryPermission({ mode: 'readwrite' });
-        if (q !== 'granted') q = await h.requestPermission({ mode: 'readwrite' });
-        if (q !== 'granted') h = null;
-      } catch (e) { h = null; }
-    }
+    if (h && (await dirPerm(h, true)) !== 'granted') h = null;
     if (!h) {
       h = await window.showDirectoryPicker({ id: 'cmpro-backup', mode: 'readwrite', startIn: 'downloads' });
       try { await kvSet('backupDir', h); } catch (e) {}
@@ -689,8 +718,23 @@
         if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) { toast('폴더 선택이 취소되었습니다'); return; }
         dir = null;   // 이 기기에서 폴더 선택을 못 쓰면 ZIP으로
       }
+      // 고른 폴더에 쓰기 권한이 없으면 사용자가 직접 눌러 권한을 요청하게 한다
+      if (dir) {
+        var perm = await dirPerm(dir, false);
+        if (perm !== 'granted') {
+          if (await askWritePermPopup()) perm = await dirPerm(dir, true);
+          if (perm !== 'granted') {
+            dir = null;
+            toast('폴더 쓰기 권한이 없어 ZIP으로 저장합니다');
+            await bkYield();
+          }
+        }
+      }
       // 하위 폴더를 만들 수 없는 기기(안드로이드 등)면 고른 폴더에 파일을 하나씩 나란히 저장한다
-      if (dir) flat = !(await backupSubdirOK(dir));
+      if (dir) {
+        flat = !(await backupSubdirOK(dir));
+        if (flat) { toast('이 폴더에는 하위 폴더를 만들 수 없어 파일을 나란히 저장합니다 (' + BK_SUBDIR_ERR + ')'); await bkYield(); }
+      }
     }
     backupProgress('자료를 모으는 중…');
     await bkYield();
@@ -3299,7 +3343,7 @@
       seq = seq.then(function () { return collectProjImages(p); }).then(function (imgs) {
         var root = 'CropMemo/' + projDirPath(p) + '/';
         imgs.forEach(function (im) {
-          try { files.push({ name: root + im.name, data: dataURLtoBytes(im.url) }); } catch (e) {}
+          try { files.push({ name: root + im.name, data: dataURLtoBytes(im.url), mtime: im.ts }); } catch (e) {}
           im.url = null;
         });
       });
@@ -3318,10 +3362,10 @@
     p = p || projectOf(curProjKey());
     var items = (p && p.items) || [];
     var out = [], used = {};
-    function push(name, dataUrl) { var n = name, c = 2; while (used[n]) { n = name.replace(/\.jpg$/, '') + '(' + (c++) + ').jpg'; } used[n] = 1; out.push({ name: n, url: dataUrl }); }
+    function push(name, dataUrl, ts) { var n = name, c = 2; while (used[n]) { n = name.replace(/\.jpg$/, '') + '(' + (c++) + ').jpg'; } used[n] = 1; out.push({ name: n, url: dataUrl, ts: ts || Date.now() }); }
     var seq = Promise.resolve();
     items.forEach(function (it) {
-      seq = seq.then(function () { return photosForGen(it.g.id); }).then(function (ps) { ps.forEach(function (ph) { push(photoFileName(it.g, ph), ph.anno || ph.orig); }); });
+      seq = seq.then(function () { return photosForGen(it.g.id); }).then(function (ps) { ps.forEach(function (ph) { push(photoFileName(it.g, ph), ph.anno || ph.orig, ph.updatedAt || ph.createdAt); }); });
     });
     return seq.then(function () { return obsAll(); }).then(function (all) {
       items.forEach(function (it) {
@@ -3329,7 +3373,7 @@
         all.forEach(function (r) {
           if (r.genId !== it.g.id || typeof r.value !== 'string' || r.value.indexOf('data:image') !== 0) return;
           var t = traitOfGen(it.g, r.traitId), l = lineById[r.lineId] || {};
-          push(safeName(it.g.projName) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + ymd(r.updatedAt) + '.jpg', r.value);
+          push(safeName(it.g.projName) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + ymd(r.updatedAt) + '.jpg', r.value, r.updatedAt);
         });
       });
       return out;
