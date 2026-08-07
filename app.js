@@ -500,6 +500,21 @@
     if (t.unit != null) { delete t.unit; return true; }
     return false;
   }
+  // 형질 수집형태 이름표 — 형질 편집 화면과 같은 말을 쓴다 (CSV 저장·불러오기에 함께 사용)
+  var TRAIT_TYPE_LABELS = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
+  function traitTypeLabel(type) { for (var i = 0; i < TRAIT_TYPE_LABELS.length; i++) if (TRAIT_TYPE_LABELS[i][0] === type) return TRAIT_TYPE_LABELS[i][1]; return '수치형'; }
+  function traitTypeFromLabel(label) {
+    var v = String(label == null ? '' : label).trim(); if (!v) return '';
+    for (var i = 0; i < TRAIT_TYPE_LABELS.length; i++) if (TRAIT_TYPE_LABELS[i][1] === v || TRAIT_TYPE_LABELS[i][0] === v) return TRAIT_TYPE_LABELS[i][0];
+    if (v.indexOf('비율') === 0) return 'ratio';
+    if (v.indexOf('수치') === 0) return 'numeric';
+    if (v.indexOf('등급') === 0) return 'rating';
+    if (v.indexOf('카운터') === 0) return 'counter';
+    if (v.indexOf('항목') === 0) return 'categorical';
+    if (v.indexOf('날짜') === 0) return 'date';
+    if (v.indexOf('문자') === 0) return 'text';
+    return '';
+  }
   function traitOfGen(g, id) { var ts = (g && g.traits) || []; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   // 과제(프로젝트) 전체 = 모든 세대를 한 파일로
   async function buildCSV(p) {
@@ -521,11 +536,11 @@
       if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
       return String(a.traitId) < String(b.traitId) ? -1 : 1;
     });
-    var rows = [['No.', '라벨번호', '품종명/Pedigree', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '개체 선발', '조합, 계통 선발']];
+    var rows = [['No.', '라벨번호', '품종명/Pedigree', '세대', '반복', '개체', '조사일', '형질', '값', '단위', '형질 수집형태', '조합, 계통 선발', '개체 선발']];
     recs.forEach(function (r, i) {
       var g = genOf[r.genId], l = lineById[r.genId + '|' + r.lineId] || {}, t = traitOfGen(g, r.traitId);
       var val = (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value;
-      rows.push([i + 1, l.label || r.lineId, l.pedigree || '', l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : ''), (l.selected ? 'Y' : '')]);
+      rows.push([i + 1, l.label || r.lineId, l.pedigree || '', l.gen || g.label, l.rep || '', r.indiv, r.date || '', (t ? t.name : r.traitId), val, traitUnit(t), traitTypeLabel(t ? t.type : 'numeric'), (l.selected ? 'Y' : ''), (S.indivSel[r.lineId + ':' + r.indiv] ? 'Y' : '')]);
     });
     var csv = rows.map(function (row) { return row.map(function (c) { c = (c == null ? '' : String(c)); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }).join('\r\n');
     var used = [];
@@ -671,33 +686,14 @@
   }
   function bkYield() { return new Promise(function (r) { setTimeout(r, 16); }); }
 
-  function backupPopup() {
+  // 기기 백업 — 팝업 없이 바로 진행
+  //   폴더 선택 저장 → (하위 폴더 못 만들면) 고른 폴더에 개별 파일 → (그것도 안 되면) ZIP
+  //   이미 폴더를 골라 둔 적이 있으면 바로 그 폴더에 저장한다
+  function startBackup() {
     cleanFolders();
-    var ps = projects();
-    if (!ps.length) { toast('백업할 과제가 없습니다'); return; }
-    var paths = ps.map(backupPathOf);
-    var shown = paths.slice(0, 5).map(function (s) {
-      return '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;word-break:break-all;display:flex;gap:5px;align-items:flex-start">' + ico('folder', '#8C9583', 13) + '<span>' + esc(s) + '</span></div>';
-    }).join('') + (paths.length > 5 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:5px">… 외 ' + (paths.length - 5) + '개</div>' : '');
-    var canDir = fsaSupported();
-    openOverlay(
-      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 기기 백업</div>' +
-      '<div class="ovl-msg">다운로드 폴더에 <b>' + BK_ROOT + '</b> 폴더를 만들고, <b>과제 모음</b>에 묶인 과제는 모음 폴더명으로, 묶이지 않은 과제는 과제명 폴더로 저장합니다.<br><span style="color:var(--text-muted)">과제 ' + ps.length + '개 · 야장 CSV · 라벨목록 CSV · 사진 jpg</span></div>' +
-      '<div style="margin-top:10px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:132px;overflow:auto">' + shown + '</div>' +
-      (canDir
-        ? '<div class="ovl-msg" style="margin-top:10px"><b>폴더에 저장</b> — 저장할 폴더를 고릅니다. 폴더를 만들 수 없는 기기(안드로이드)에서는 <b>고른 폴더에 파일을 하나씩</b> 저장하고, 파일명 앞에 <b>모음·과제명</b>을 붙여 구분합니다.<br><b>ZIP 저장</b> — 위 폴더 구조를 그대로 담은 압축 파일 하나를 다운로드 폴더에 저장합니다.</div>'
-        : '<div class="ovl-msg" style="margin-top:10px;color:var(--amber-ink)">이 브라우저는 폴더를 고를 수 없어, 위 폴더 구조를 그대로 담은 <b>ZIP 파일 하나</b>를 다운로드 폴더에 저장합니다. 파일을 눌러 <b>압축 풀기</b>를 하면 폴더가 그대로 만들어집니다.</div>') +
-      '<div class="ovl-btns"><button class="btn" id="bkCancel">취소</button>' +
-      (canDir
-        ? '<button class="btn" id="bkZip">ZIP 저장</button><button class="btn primary" id="bkDir">' + ico('folder', '#fff', 16) + ' 폴더에 저장</button>'
-        : '<button class="btn primary" id="bkZip">' + ico('download', '#fff', 16) + ' 백업 시작</button>') +
-      '</div>'
-    );
-    $('bkCancel').onclick = closeOverlay;
-    $('bkZip').onclick = function () { runBackup(false); };
-    if ($('bkDir')) $('bkDir').onclick = function () { runBackup(true); };
+    if (!projects().length) { toast('백업할 과제가 없습니다'); return; }
+    runBackup(fsaSupported());
   }
-
   async function runBackup(toDir) {
     var dir = null, flat = false;
     if (toDir) {
@@ -1113,7 +1109,8 @@
 
   function homeEmptyHTML() {
     return '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px"><div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div><div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div><button class="btn" id="heGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button></div>' +
-      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button></div>';
+      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button>' +
+      '<button class="btn" id="heLoad" style="height:46px;padding:0 20px;font-size:14px;margin-top:10px;display:inline-flex;align-items:center;gap:6px">' + ico('database-import', 'var(--text-primary)', 17) + ' 백업에서 불러오기</button></div>';
   }
   function selectGen(i) { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var g = curGen(); S.date = g.surveyDates[g.surveyDates.length - 1]; S.trait = g.traits[0].id; loadVals().then(function () { go('collect'); }); }
   // 과제 복제 — 구성(세대·라벨·형질)만 복사하고 조사 내용은 제외
@@ -1464,7 +1461,7 @@
   }
   function renderHome() {
     var v = $('view-home');
-    if (!S.gens.length) { v.innerHTML = homeEmptyHTML(); if ($('heGear')) $('heGear').onclick = function () { go('settings'); }; if ($('heNew')) $('heNew').onclick = function () { startNew(); }; return; }
+    if (!S.gens.length) { v.innerHTML = homeEmptyHTML(); if ($('heGear')) $('heGear').onclick = function () { go('settings'); }; if ($('heNew')) $('heNew').onclick = function () { startNew(); }; if ($('heLoad')) $('heLoad').onclick = function () { importPopup(); }; return; }
     var g = curGen(), l = curLine();
     var hc = projCounts(projectOf(curProjKey()));
     var doneToday = Object.keys(S.vals).length; // rough
@@ -1493,16 +1490,21 @@
       '<div style="display:flex;gap:8px;margin:14px 14px 0">' +
         stat(hc.comb, '조합') + stat(hc.line, '계통') + stat(hc.sel, '선발') + statP() +
       '</div>' +
-      '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span><button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button></div>' +
+      '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span>' +
+          '<div style="display:flex;gap:6px">' +
+            '<button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button>' +
+            '<button class="btn" id="hLoad" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('database-import', 'var(--text-primary)', 14) + ' 불러오기</button>' +
+          '</div></div>' +
         '<div class="projgrid">' + renderProjList() + '</div>' +
       '</div>' +
       '<div style="height:20px"></div>';
     renderSyncStat($('syncStat'));
     $('syncStat').onclick = function () { if (S.settings.syncOn === false) { toast('동기화가 꺼져 있습니다 · 오른쪽 스위치로 켜세요'); return; } trySync(false); };
-    $('bkCard').onclick = function () { backupPopup(); };
+    $('bkCard').onclick = function () { startBackup(); };
     $('hGear').onclick = function () { go('settings'); };
     $('hResume').onclick = function () { go('collect'); };
     $('hNew').onclick = function () { startNew(); };
+    $('hLoad').onclick = function () { importPopup(); };
     document.querySelectorAll('.hprojopen').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) selectGen(p.items[0].idx); }; });
     document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
     document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; go('genedit'); } }; });
@@ -3489,7 +3491,8 @@
    * ========================================================== */
   // 강조 상자 좌표 — 화면(412x892) 기준 백분율
   var GBOX = {
-    hNew:     { x: 77.2, y: 51.5, w: 19.4, h: 3.3 },
+    hNew:     { x: 54.4, y: 51.5, w: 19.4, h: 3.3 },
+    hLoad:    { x: 75.2, y: 51.5, w: 21.4, h: 3.3 },
     bkCard:   { x: 3.4,  y: 15.5, w: 93.2, h: 6.7 },
     cCard:    { x: 2.9,  y: 8.6,  w: 94.2, h: 7.2 },
     cPills:   { x: 1.5,  y: 21.8, w: 97,   h: 4.8 },
@@ -3509,10 +3512,10 @@
         body: '인터넷이 없는 필드에서도 야장을 기록/분석하고, 온라인시 동기화를 통해 자동 전송 가능합니다.',
         note: '설치 직후에는 둘러보기용 예시 과제가 하나 들어 있습니다. 필요 없으면 지우고 새로 만드세요.' },
 
-      { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기',
-        body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽의 <b>+ 새 과제</b>를 누릅니다.',
+      { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기 · 불러오기',
+        body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽에서 <b>+ 새 과제</b>로 새로 만들고, <b>불러오기</b>로 기기에 백업해 둔 과제를 되살립니다.',
         note: '생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
-        calls: [gc('hNew', 1, 'right', '여기를 누르세요')] },
+        calls: [gc('hNew', 1, 'left'), gc('hLoad', 2, 'right')] },
 
       { img: '03-wizard1', chap: '과제 생성 3단계 · 1 / 3', title: '① 과제 정보',
         body: '작물을 고르고 <b>과제명</b>과 <b>라벨 접두어</b>를 입력합니다. 목록에 없는 작물은 <b>+ 작물 추가</b>로 만들 수 있습니다.' },
@@ -3560,8 +3563,10 @@
         body: 'Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 구글 시트·드라이브로 자동 전송됩니다. 오프라인에서는 기기에 쌓였다가 연결되는 순간 한 번에 올라갑니다.',
         calls: [gc('sUrl', 1), gc('sSyncOn', 2, 'right')] },
 
-      { img: '16-backup', chap: '기기 백업', title: '내 기기에 조사 자료 전체 백업 하기',
-        body: '홈의 <b>기기 백업</b>을 누르면 다운로드 폴더의 <b>CropMemo</b> 폴더에 모든 과제의 야장 CSV·라벨목록·사진이 저장됩니다. 폰에서는 폴더 구조를 그대로 담은 <b>ZIP 한 개</b>로 저장되니 압축만 풀면 됩니다.' },
+      { img: '16-backup', chap: '기기 백업', title: '내 기기에 자료 백업 하기',
+        body: '홈의 <b>기기 백업</b>을 누르면 백업 폴더 선택 후 백업이 진행 됩니다. 전체 과제의 모든 데이터, 사진 자료가 저장됩니다.',
+        note: 'Chrome 브라우저 앱 설치시 정상 백업 지원 되며, 다른 브라우저 앱 설치의 경우 ZIP 파일 다운로드로 진행됩니다.',
+        calls: [gc('bkCard', 1)] },
 
       { last: true, chap: '', title: 'Crop Memo Pro!',
         body: '이제 첫 과제를 만들고, 동기화/백업을 수행 해보세요.<br>인터넷이 끊겨도 입력한 값은 기기에 남지만, 안전을 위해 데이터 백업 하시기 바랍니다.' }
@@ -3643,6 +3648,435 @@
     if (ni < 0 || ni >= G.slides.length) return;
     G.i = ni; haptic(10); renderGuide();
     var c = document.querySelector('#guideOvl .gcard'); if (c) c.scrollTop = 0;
+  }
+
+
+  /* ==========================================================
+   * 과제 불러오기 — 기기에 저장한 백업에서 과제를 되살린다
+   *   받을 수 있는 것: 백업 ZIP · 과제 폴더 · 모음 폴더 · 야장/라벨목록 CSV
+   * ========================================================== */
+
+  // ----- ZIP 읽기 (저장 방식 store + deflate) -----
+  function u16(a, i) { return a[i] | (a[i + 1] << 8); }
+  function u32(a, i) { return (a[i] | (a[i + 1] << 8) | (a[i + 2] << 16) | (a[i + 3] << 24)) >>> 0; }
+  async function inflateRaw(bytes) {
+    if (typeof DecompressionStream !== 'function') throw new Error('이 브라우저는 압축 해제를 지원하지 않습니다');
+    var ds = new DecompressionStream('deflate-raw');
+    var buf = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint8Array(buf);
+  }
+  async function unzipEntries(u8) {
+    var eocd = -1;
+    for (var i = u8.length - 22; i >= 0 && i > u8.length - 66000; i--) { if (u32(u8, i) === 0x06054b50) { eocd = i; break; } }
+    if (eocd < 0) throw new Error('ZIP 형식이 아닙니다');
+    var n = u16(u8, eocd + 10), cOff = u32(u8, eocd + 16), p = cOff, out = [];
+    var dec = new TextDecoder('utf-8');
+    for (var k = 0; k < n; k++) {
+      if (u32(u8, p) !== 0x02014b50) break;
+      var method = u16(u8, p + 10), csize = u32(u8, p + 20), usize = u32(u8, p + 24);
+      var nlen = u16(u8, p + 28), elen = u16(u8, p + 30), clen = u16(u8, p + 32), lOff = u32(u8, p + 42);
+      var name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+      p += 46 + nlen + elen + clen;
+      if (/\/$/.test(name)) continue;                              // 폴더 항목
+      var lnlen = u16(u8, lOff + 26), lelen = u16(u8, lOff + 28);
+      var start = lOff + 30 + lnlen + lelen;
+      var raw = u8.subarray(start, start + csize);
+      out.push({ path: name, name: name.split('/').pop(), method: method, raw: raw, usize: usize });
+    }
+    var res = [];
+    for (var j = 0; j < out.length; j++) {
+      var e = out[j], data;
+      if (e.method === 0) data = e.raw.slice();
+      else if (e.method === 8) data = await inflateRaw(e.raw);
+      else continue;
+      res.push({ path: e.path, name: e.name, data: data });
+    }
+    return res;
+  }
+
+  // ----- CSV 파싱 -----
+  function parseCSV(text) {
+    text = String(text || '').replace(/^﻿/, '');
+    var rows = [], row = [], cur = '', q = false;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charAt(i);
+      if (q) {
+        if (c === '"') { if (text.charAt(i + 1) === '"') { cur += '"'; i++; } else q = false; }
+        else cur += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { row.push(cur); cur = ''; }
+      else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (c !== '\r') cur += c;
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows.filter(function (r) { return r.join('').trim() !== ''; });
+  }
+  function csvObjects(text) {
+    var rows = parseCSV(text);
+    if (rows.length < 2) return null;
+    var head = rows[0].map(function (h) { return h.trim(); });
+    return rows.slice(1).map(function (r) {
+      var o = {}; head.forEach(function (h, i) { o[h] = (r[i] == null ? '' : String(r[i]).trim()); }); return o;
+    });
+  }
+  function pick(o) { for (var i = 1; i < arguments.length; i++) { var k = arguments[i]; if (o[k] != null && o[k] !== '') return o[k]; } return ''; }
+  function csvKind(text) {
+    var first = String(text || '').replace(/^﻿/, '').split(/\r?\n/)[0] || '';
+    if (first.indexOf('형질') >= 0 && first.indexOf('값') >= 0) return 'obs';
+    if (first.indexOf('라벨번호') >= 0 && (first.indexOf('개체수') >= 0 || first.indexOf('과제명') >= 0)) return 'lines';
+    return '';
+  }
+
+  // ----- 경로에서 모음/과제 이름 뽑기 -----
+  function importWhere(path, fileName) {
+    var segs = String(path || fileName).split('/').filter(Boolean);
+    segs.pop();                                                        // 파일명 제거
+    segs = segs.filter(function (x) { return x !== BK_ROOT && x !== '사진'; });
+    if (segs.length >= 2) return { group: segs[segs.length - 2], proj: segs[segs.length - 1] };
+    if (segs.length === 1) return { group: '', proj: segs[0] };
+    // 평면 파일명: CropMemo_[모음_]과제_(야장|라벨목록|사진)_…
+    var m = fileName.match(/^CropMemo_(.+?)_(야장|라벨목록|사진)_/);
+    if (m) return { group: '', proj: m[1], flat: true };
+    var base = fileName.replace(/\.[^.]+$/, '');
+    var m2 = base.match(/^(.+)_(야장|라벨목록)_/);                       // 기기 백업 파일명
+    if (m2) return { group: '', proj: m2[1] };
+    var m3 = base.match(/^(.+)_[^_]*-[^_]*_\d{4}-\d{2}-\d{2}$/);        // 내보내기 파일명(과제명_처음라벨-마지막라벨_일자)
+    if (m3) return { group: '', proj: m3[1] };
+    var m4 = base.match(/^(.+)_\d{4}-\d{2}-\d{2}$/);
+    return { group: '', proj: m4 ? m4[1] : base };
+  }
+
+  // ----- 파일들을 과제별로 묶어 불러올 계획을 만든다 -----
+  async function buildImportPlan(entries, onStep) {
+    var dec = new TextDecoder('utf-8'), byKey = {}, order = [];
+    function slot(w) {
+      var key = (w.group || '') + '||' + w.proj;
+      if (!byKey[key]) { byKey[key] = { group: w.group || '', proj: w.proj, lineRows: null, obsRows: [], photos: [], flat: !!w.flat }; order.push(key); }
+      return byKey[key];
+    }
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i], nm = e.name || '';
+      if (onStep && i % 10 === 0) onStep('파일 읽는 중 ' + (i + 1) + '/' + entries.length, 0.1 + (i / entries.length) * 0.5);
+      if (/\.csv$/i.test(nm)) {
+        var text = dec.decode(e.data), kind = csvKind(text);
+        if (!kind) continue;
+        var w = importWhere(e.path, nm), sl = slot(w), objs = csvObjects(text);
+        if (!objs) continue;
+        if (kind === 'lines') { sl.lineRows = objs; if (objs[0] && objs[0]['과제명']) sl.projFromCsv = objs[0]['과제명']; }
+        else sl.obsRows = sl.obsRows.concat(objs);
+      } else if (/\.(jpe?g|png)$/i.test(nm)) {
+        var w2 = importWhere(e.path, nm), sl2 = slot(w2);
+        sl2.photos.push({ name: nm, data: e.data });
+      }
+    }
+    // 평면 파일명에서 모음_과제 를 분리 (라벨목록 CSV의 과제명 열이 있으면 그걸로)
+    var plan = order.map(function (k) { return byKey[k]; }).filter(function (s) { return s.lineRows || s.obsRows.length || s.photos.length; });
+    plan.forEach(function (s) {
+      if (s.flat && s.projFromCsv && s.proj !== s.projFromCsv && s.proj.indexOf('_' + s.projFromCsv) > 0) {
+        s.group = s.proj.slice(0, s.proj.length - s.projFromCsv.length - 1);
+        s.proj = s.projFromCsv;
+      } else if (s.projFromCsv) s.proj = s.projFromCsv;
+    });
+    // 같은 (모음,과제) 끼리 합치기
+    var merged = {}, out = [];
+    plan.forEach(function (s) {
+      var k = s.group + '||' + s.proj;
+      if (!merged[k]) { merged[k] = s; out.push(s); return; }
+      var m = merged[k];
+      if (!m.lineRows) m.lineRows = s.lineRows;
+      m.obsRows = m.obsRows.concat(s.obsRows);
+      m.photos = m.photos.concat(s.photos);
+    });
+    out.forEach(function (s) {
+      var labels = {};
+      (s.lineRows || []).forEach(function (r) { labels[pick(r, '라벨번호')] = 1; });
+      s.obsRows.forEach(function (r) { labels[pick(r, '라벨번호')] = 1; });
+      delete labels[''];
+      s.nLabels = Object.keys(labels).length;
+      s.nObs = s.obsRows.length;
+      s.nPhotos = s.photos.length;
+    });
+    return out.filter(function (s) { return s.nLabels || s.nPhotos; });
+  }
+
+  // ----- 계획대로 과제를 만든다 -----
+  function inferTraitType(vals, unit) {
+    var u = (unit || '').trim();
+    if (u === '%') return { type: 'ratio', unit: '%' };
+    if (u === '개') return { type: 'counter' };
+    var nOk = 0, nDate = 0, n = 0;
+    vals.forEach(function (v) {
+      v = String(v == null ? '' : v).trim(); if (!v) return;
+      n++;
+      if (/^-?\d+(\.\d+)?$/.test(v)) nOk++;
+      // 21.3 같은 소수를 날짜로 잘못 보지 않도록 구분자는 - / 만 인정한다
+      else if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(v) || /^\d{1,2}[-/]\d{1,2}$/.test(v)) nDate++;
+    });
+    if (!n) return { type: 'text' };
+    if (nOk / n > 0.8) return { type: 'numeric', unit: u };     // 수치를 먼저 본다
+    if (nDate / n > 0.8) return { type: 'date' };
+    return { type: 'text' };
+  }
+  function uniqName(name) {
+    var names = {}; S.gens.forEach(function (g) { names[g.projName] = 1; });
+    if (!names[name]) return name;
+    var i = 2, n2 = name + ' (불러옴)';
+    while (names[n2]) n2 = name + ' (불러옴 ' + (i++) + ')';
+    return n2;
+  }
+  async function applyImportPlan(plan, onStep) {
+    var base = Date.now(), madeProj = 0, madeGen = 0, madeObs = 0, madePhoto = 0, newFolders = {};
+    for (var pi = 0; pi < plan.length; pi++) {
+      var s = plan[pi];
+      if (onStep) onStep('과제 만드는 중 ' + (pi + 1) + '/' + plan.length + '\n' + s.proj, 0.6 + (pi / plan.length) * 0.35);
+      await bkYield();
+      var projName = uniqName(s.proj), projId = 'P' + base + '_' + pi;
+
+      // 1) 형질 — 야장 CSV의 형질명·단위에서
+      var traitOrder = [], traitVals = {}, traitUnit = {}, traitDates = {}, traitKind = {};
+      s.obsRows.forEach(function (r) {
+        var tn = pick(r, '형질'); if (!tn) return;
+        if (!traitVals[tn]) { traitVals[tn] = []; traitOrder.push(tn); traitDates[tn] = {}; }
+        traitVals[tn].push(pick(r, '값'));
+        if (!traitUnit[tn]) traitUnit[tn] = pick(r, '단위');
+        if (!traitKind[tn]) traitKind[tn] = traitTypeFromLabel(pick(r, '형질 수집형태', '수집형태', '형질형태'));
+        var d = pick(r, '조사일'); if (d) traitDates[tn][d] = 1;
+      });
+      var traits = traitOrder.map(function (tn, ti) {
+        var t = { id: 't' + (ti + 1), name: tn };
+        var kind = traitKind[tn];                       // CSV의 '형질 수집형태' 열이 있으면 그대로 따른다
+        if (kind) {
+          t.type = kind;
+          if (kind === 'numeric') { var u = (traitUnit[tn] || '').trim(); if (u) t.unit = u; }
+        } else {
+          var inf = inferTraitType(traitVals[tn], traitUnit[tn]);   // 없으면 값에서 추정
+          t.type = inf.type; if (inf.unit) t.unit = inf.unit;
+        }
+        // 등급·항목형은 실제로 쓰인 값에서 척도·항목을 되살린다
+        if (t.type === 'rating') {
+          var nums = {}, txts = {};
+          traitVals[tn].forEach(function (v) {
+            v = String(v == null ? '' : v).trim(); if (!v || v === UNREADABLE) return;
+            if (/^-?\d+(\.\d+)?$/.test(v)) nums[+v] = 1; else txts[v] = 1;
+          });
+          var nk = Object.keys(nums).map(Number).sort(function (a2, b2) { return a2 - b2; });
+          var tk = Object.keys(txts);
+          // 쓰인 값만으로는 척도가 비어 보이므로, 흔한 척도에 들어맞으면 그 척도로 되살린다
+          function within(arr, allowed) { return arr.length && arr.every(function (v) { return allowed.indexOf(v) >= 0; }); }
+          var full19 = [1, 2, 3, 4, 5, 6, 7, 8, 9], odd19 = [1, 3, 5, 7, 9], one5 = [1, 2, 3, 4, 5];
+          if (within(nk, odd19)) nk = odd19.slice();
+          else if (within(nk, one5)) nk = one5.slice();
+          else if (within(nk, full19)) nk = full19.slice();
+          t.scale = withUnreadable(nk.length ? nk : (tk.length ? tk : [1, 3, 5, 7, 9]));
+        } else if (t.type === 'categorical') {
+          var opts = [];
+          traitVals[tn].forEach(function (v) { v = String(v == null ? '' : v).trim(); if (v && opts.indexOf(v) < 0) opts.push(v); });
+          t.options = opts.length ? opts : ['항목1', '항목2', '항목3'];
+        }
+        normalizeUnit(t);
+        if (Object.keys(traitDates[tn]).length > 1) t.series = true;
+        return t;
+      });
+      if (!traits.length) traits = [{ id: 't1', name: '초장', type: 'numeric', unit: 'cm' }];
+      var traitIdByName = {}; traits.forEach(function (t) { traitIdByName[t.name] = t.id; });
+
+      // 2) 라벨 — 라벨목록 CSV 우선, 없으면 야장에서 뽑는다
+      var lineDefs = [], seen = {};
+      function addLine(gen, label, ped, rep, block, zone, indiv, sel) {
+        var k = (gen || '') + '|' + label + '|' + (rep || '');
+        if (seen[k] || !label) return; seen[k] = 1;
+        lineDefs.push({ gen: (gen || 'F#'), label: label, pedigree: ped || '', rep: rep || '', block: block || '', zone: zone || '', indivTotal: Math.max(1, +indiv || 10), selected: sel === 'Y' });
+      }
+      (s.lineRows || []).forEach(function (r) {
+        addLine(pick(r, '세대'), pick(r, '라벨번호'), pick(r, '품종명/Pedigree', '품종명', 'Pedigree'), pick(r, '반복'), pick(r, '블록'), pick(r, '구역'), pick(r, '개체수'), pick(r, '조합, 계통 선발', '계통 선발', '선발'));
+      });
+      var maxIndiv = {};
+      s.obsRows.forEach(function (r) {
+        var lb = pick(r, '라벨번호'), gn = pick(r, '세대'), rp = pick(r, '반복');
+        addLine(gn, lb, pick(r, '품종명/Pedigree', '품종명'), rp, '', '', 0, pick(r, '조합, 계통 선발'));
+        var k = (gn || '') + '|' + lb + '|' + (rp || ''), iv = +pick(r, '개체') || 1;
+        if (!maxIndiv[k] || maxIndiv[k] < iv) maxIndiv[k] = iv;
+      });
+      lineDefs.forEach(function (l) {
+        var k = (l.gen || '') + '|' + l.label + '|' + (l.rep || '');
+        if (maxIndiv[k] && maxIndiv[k] > l.indivTotal) l.indivTotal = maxIndiv[k];
+      });
+      if (!lineDefs.length) continue;
+
+      // 3) 세대별로 gen 만들기
+      var byGenLabel = {}, genOrder = [];
+      lineDefs.forEach(function (l) { var gl = l.gen || 'F#'; if (!byGenLabel[gl]) { byGenLabel[gl] = []; genOrder.push(gl); } byGenLabel[gl].push(l); });
+      genOrder.sort(function (a, b) { return byGen(a, b); });
+      var dates = {}; s.obsRows.forEach(function (r) { var d = pick(r, '조사일'); if (d) dates[d] = 1; });
+      var dlist = Object.keys(dates); if (!dlist.length) dlist = [todayStr()];
+      var lineKeyToId = {}, newGens = [];
+      genOrder.forEach(function (gl, gi) {
+        var gid = 'G' + base + '_' + pi + '_' + gi;
+        var lines = byGenLabel[gl].map(function (l, li) {
+          var id = 'L' + String(li + 1).padStart(3, '0');
+          lineKeyToId[(l.gen || '') + '|' + l.label + '|' + (l.rep || '')] = { gid: gid, id: id };
+          return { id: id, label: l.label, pedigree: l.pedigree, rep: l.rep, block: l.block, zone: l.zone, row: Math.floor(li / 10) + 1, col: (li % 10) + 1, indivTotal: l.indivTotal, selected: !!l.selected };
+        });
+        newGens.push({ id: gid, projId: projId, projName: projName, crop: '불러옴', color: '#639922', label: gl, prefix: (lines[0] && String(lines[0].label).split('-')[0]) || '', surveyDates: dlist.slice(), traits: JSON.parse(JSON.stringify(traits)), lines: lines });
+        madeGen++;
+      });
+      S.gens = S.gens.concat(newGens);
+      madeProj++;
+
+      // 4) 조사값
+      var st = os('obs', 'readwrite');
+      s.obsRows.forEach(function (r) {
+        var lb = pick(r, '라벨번호'), gn = pick(r, '세대'), rp = pick(r, '반복');
+        var ref = lineKeyToId[(gn || '') + '|' + lb + '|' + (rp || '')] || lineKeyToId[(gn || 'F#') + '|' + lb + '|' + (rp || '')];
+        if (!ref) return;
+        var tn = pick(r, '형질'), tid = traitIdByName[tn]; if (!tid) return;
+        var t = null; traits.forEach(function (x) { if (x.id === tid) t = x; });
+        var iv = +pick(r, '개체') || 1, d = pick(r, '조사일') || dlist[dlist.length - 1];
+        var raw = pick(r, '값'); if (raw === '' || raw === '(그림)') return;
+        var val = (t && (t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter') && /^-?\d+(\.\d+)?$/.test(raw)) ? +raw : raw;
+        var key = ref.gid + ':' + ref.id + ':' + iv + ':' + tid + (t && t.series ? ('@' + d) : '');
+        st.put({ k: key, genId: ref.gid, lineId: ref.id, indiv: iv, traitId: tid, value: val, date: d, ser: !!(t && t.series), updatedAt: Date.now(), synced: 0, dirty: 1 });
+        madeObs++;
+        if (pick(r, '개체 선발') === 'Y') S.indivSel[ref.id + ':' + iv] = true;
+      });
+
+      // 5) 사진 — 파일명 …_라벨번호_개체번호_형질_일자.jpg
+      for (var qi = 0; qi < s.photos.length; qi++) {
+        var ph = s.photos[qi], parts = ph.name.replace(/\.[^.]+$/, '').split('_');
+        if (parts.length < 4) continue;
+        var pTrait = parts[parts.length - 2], pIndiv = +parts[parts.length - 3] || 1, pLabel = parts[parts.length - 4];
+        var ref2 = null;
+        Object.keys(lineKeyToId).forEach(function (k) { if (!ref2 && k.split('|')[1] === pLabel) ref2 = lineKeyToId[k]; });
+        if (!ref2) continue;
+        var b64 = '';
+        try {
+          var chunk = 0x8000, strs = [];
+          for (var o = 0; o < ph.data.length; o += chunk) strs.push(String.fromCharCode.apply(null, ph.data.subarray(o, o + chunk)));
+          b64 = btoa(strs.join(''));
+        } catch (e) { continue; }
+        await photoPut({ id: 'IMP' + base + '_' + pi + '_' + qi, genId: ref2.gid, lineId: ref2.id, indiv: pIndiv, traitName: pTrait, orig: 'data:image/jpeg;base64,' + b64, createdAt: Date.now() });
+        madePhoto++;
+      }
+
+      // 6) 모음 폴더
+      if (s.group) {
+        var f = null; folders().forEach(function (x) { if (x.name === s.group) f = x; });
+        if (!f) { f = { id: 'F' + base + '_' + pi, name: s.group, ids: [] }; folders().push(f); newFolders[f.id] = 1; }
+        if (f.ids.indexOf(projId) < 0) f.ids.push(projId);
+      }
+    }
+    await kvSet('gens', S.gens);
+    await kvSet('indivSel', S.indivSel);
+    cleanFolders(); await saveFolders();
+    await loadVals();
+    return { projects: madeProj, gens: madeGen, obs: madeObs, photos: madePhoto };
+  }
+
+  // ----- 파일 모으기 -----
+  async function entriesFromFileList(fileList, onStep) {
+    var out = [];
+    for (var i = 0; i < fileList.length; i++) {
+      var f = fileList[i];
+      if (onStep) onStep('파일 여는 중 ' + (i + 1) + '/' + fileList.length, 0.05);
+      var buf = new Uint8Array(await f.arrayBuffer());
+      var rel = f.webkitRelativePath || f.name;
+      if (/\.zip$/i.test(f.name)) {
+        try { out = out.concat(await unzipEntries(buf)); }
+        catch (e) { throw new Error(f.name + ' — ' + (e.message || 'ZIP을 열 수 없습니다')); }
+      } else out.push({ path: rel, name: f.name, data: buf });
+    }
+    return out;
+  }
+  async function entriesFromDir(dir, prefix, out, onStep) {
+    out = out || []; prefix = prefix || dir.name || '';
+    for await (var [nm, h] of dir.entries()) {
+      if (h.kind === 'directory') await entriesFromDir(h, prefix + '/' + nm, out, onStep);
+      else {
+        var f = await h.getFile();
+        if (!/\.(csv|jpe?g|png|zip)$/i.test(nm)) continue;
+        var buf = new Uint8Array(await f.arrayBuffer());
+        if (/\.zip$/i.test(nm)) { try { out.push.apply(out, await unzipEntries(buf)); } catch (e) {} }
+        else out.push({ path: prefix + '/' + nm, name: nm, data: buf });
+        if (onStep && out.length % 10 === 0) onStep('파일 읽는 중 ' + out.length + '개', 0.1);
+      }
+    }
+    return out;
+  }
+
+  // ----- 화면 -----
+  function importPopup() {
+    var canDir = fsaSupported();
+    openOverlay(
+      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 과제 불러오기</div>' +
+      '<div class="ovl-msg">기기에 저장해 둔 백업에서 과제를 되살립니다.<br>' +
+        '<b>백업 ZIP · 과제 폴더 · 모음 폴더 · 야장/라벨목록 CSV</b> 중 하나를 고르세요.</div>' +
+      '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">' +
+        '<button class="btn primary" id="imFile" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-upload', '#fff', 18) + ' 파일 선택 (ZIP · CSV)</button>' +
+        (canDir ? '<button class="btn" id="imDir" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('folder', 'var(--text-primary)', 18) + ' 폴더 선택 (과제 · 모음 폴더)</button>' : '') +
+      '</div>' +
+      '<input type="file" id="imInput" accept=".zip,.csv,.jpg,.jpeg,.png" multiple style="display:none">' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">불러온 과제는 <b>새 과제로 추가</b>됩니다. 지금 있는 과제는 지워지지 않습니다.</div>' +
+      '<div class="ovl-btns"><button class="btn" id="imCancel">취소</button></div>'
+    );
+    $('imCancel').onclick = closeOverlay;
+    $('imFile').onclick = function () { $('imInput').click(); };
+    $('imInput').onchange = function () {
+      var fl = this.files; if (!fl || !fl.length) return;
+      closeOverlay(); runImport(function (onStep) { return entriesFromFileList(fl, onStep); });
+    };
+    if ($('imDir')) $('imDir').onclick = async function () {
+      var dh = null;
+      try { dh = await window.showDirectoryPicker({ id: 'cmpro-import', mode: 'read', startIn: 'downloads' }); }
+      catch (e) { return; }
+      closeOverlay(); runImport(function (onStep) { return entriesFromDir(dh, dh.name, [], onStep); });
+    };
+  }
+
+  function importProgress(msg) {
+    var o = openOverlay(
+      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 과제 불러오기</div>' +
+      '<div class="ovl-msg" id="bkMsg" style="white-space:pre-line;min-height:38px">' + esc(msg) + '</div>' +
+      '<div style="height:8px;border-radius:6px;background:var(--surface-1);overflow:hidden;margin-top:12px"><div id="bkBar" style="height:100%;width:4%;background:var(--green);transition:width .25s"></div></div>'
+    );
+    o.classList.add('lock');
+  }
+
+  async function runImport(collect) {
+    importProgress('파일을 읽는 중…');
+    await bkYield();
+    var entries, plan;
+    try {
+      entries = await collect(bkStep);
+      if (!entries.length) { closeOverlay(); toast('읽을 수 있는 파일이 없습니다'); return; }
+      plan = await buildImportPlan(entries, bkStep);
+    } catch (e) {
+      closeOverlay(); toast('불러오기 실패 · ' + ((e && e.message) || '파일을 읽을 수 없습니다')); return;
+    }
+    if (!plan.length) { closeOverlay(); toast('과제로 읽을 수 있는 자료가 없습니다 · CSV가 들어 있는지 확인하세요'); return; }
+    closeOverlay();
+    var rows = plan.slice(0, 6).map(function (s) {
+      return '<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:6px">' + ico(s.group ? 'folder' : 'clipboard-list', '#639922', 13) +
+        '<div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-all">' + (s.group ? esc(s.group) + ' / ' : '') + esc(s.proj) + '</div>' +
+        '<div style="color:var(--text-muted);font-size:11px">라벨 ' + s.nLabels + ' · 조사값 ' + s.nObs + ' · 사진 ' + s.nPhotos + '</div></div></div>';
+    }).join('') + (plan.length > 6 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">… 외 ' + (plan.length - 6) + '개</div>' : '');
+    openOverlay(
+      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 불러올 과제 ' + plan.length + '개</div>' +
+      '<div style="margin-top:8px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:190px;overflow:auto">' + rows + '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">새 과제로 추가됩니다. 형질은 CSV의 <b>형질 수집형태</b> 열을 그대로 따르고, 그 열이 없는 옛 파일은 값에서 추정합니다. 등급 척도·항목 목록은 실제로 쓰인 값에서 되살리니 불러온 뒤 <b>과제 수정 → 형질 편집</b>에서 확인해 주세요.</div>' +
+      '<div class="ovl-btns"><button class="btn" id="ipCancel">취소</button><button class="btn primary" id="ipOk">불러오기</button></div>'
+    );
+    $('ipCancel').onclick = closeOverlay;
+    $('ipOk').onclick = async function () {
+      closeOverlay(); importProgress('과제를 만드는 중…'); await bkYield();
+      try {
+        var r = await applyImportPlan(plan, bkStep);
+        closeOverlay();
+        toast('불러오기 완료 · 과제 ' + r.projects + '개 · 조사값 ' + r.obs + '건' + (r.photos ? ' · 사진 ' + r.photos + '장' : ''));
+        S.genIdx = 0; renderHome();
+      } catch (e) {
+        closeOverlay(); toast('불러오기 실패 · ' + ((e && e.message) || '자료를 만들 수 없습니다'));
+      }
+    };
   }
 
   // ---------- net ----------
