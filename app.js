@@ -623,18 +623,6 @@
       return q;
     } catch (e) { return 'denied'; }
   }
-  // 쓰기 권한이 없을 때 — 사용자가 직접 누르게 해서 권한 요청 (브라우저는 '방금 누른' 동작에서만 권한창을 띄운다)
-  function askWritePermPopup() {
-    return new Promise(function (resolve) {
-      openOverlay(
-        '<div class="ovl-title">' + ico('lock', '#3B6D11', 18) + ' 저장 권한 허용</div>' +
-        '<div class="ovl-msg">고른 폴더에 <b>쓰기 권한</b>이 아직 없습니다.<br>아래 <b>권한 허용</b>을 누르고 브라우저 팝업에서 <b>허용</b>을 선택하면 폴더에 그대로 저장됩니다.<br><span style="color:var(--text-muted)">허용하지 않으면 ZIP 파일로 저장합니다.</span></div>' +
-        '<div class="ovl-btns"><button class="btn" id="pmSkip">ZIP으로 저장</button><button class="btn primary" id="pmOk">' + ico('lock', '#fff', 15) + ' 권한 허용</button></div>'
-      );
-      $('pmSkip').onclick = function () { closeOverlay(); resolve(false); };
-      $('pmOk').onclick = function () { closeOverlay(); resolve(true); };
-    });
-  }
   async function getBackupDir(forcePick) {
     var h = null;
     if (!forcePick) { try { h = await kvGet('backupDir'); } catch (e) { h = null; } }
@@ -717,18 +705,6 @@
       catch (e) {
         if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) { toast('폴더 선택이 취소되었습니다'); return; }
         dir = null;   // 이 기기에서 폴더 선택을 못 쓰면 ZIP으로
-      }
-      // 고른 폴더에 쓰기 권한이 없으면 사용자가 직접 눌러 권한을 요청하게 한다
-      if (dir) {
-        var perm = await dirPerm(dir, false);
-        if (perm !== 'granted') {
-          if (await askWritePermPopup()) perm = await dirPerm(dir, true);
-          if (perm !== 'granted') {
-            dir = null;
-            toast('폴더 쓰기 권한이 없어 ZIP으로 저장합니다');
-            await bkYield();
-          }
-        }
       }
       // 하위 폴더를 만들 수 없는 기기(안드로이드 등)면 고른 폴더에 파일을 하나씩 나란히 저장한다
       if (dir) {
