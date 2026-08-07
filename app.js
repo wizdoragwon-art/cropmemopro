@@ -334,6 +334,9 @@
     var token = await odEnsureToken(silent);
     if (!token) return { ok: false };
     var dir = projDirPath(proj);
+    // 라벨목록은 조사값이 없어도 항상 올려 과제 폴더가 만들어지게 한다
+    var lab = buildLabelCSV(proj);
+    if (lab) await odUpload(token, dir, safeName(proj.name) + '_라벨목록_' + ymd() + '.csv', new Blob(['\uFEFF' + lab], { type: 'text/csv;charset=utf-8' }), 'text/csv');
     var built = await buildCSV(proj), csvOk = true;
     if (built) csvOk = await odUpload(token, dir, built.name, new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), 'text/csv');
     var sent = await kvGet('imgSyncedOD') || {};
@@ -355,18 +358,28 @@
   }
   async function syncDrive(url, silent) {
     var auth = { deviceId: S.settings.deviceId, token: S.settings.token || '' };
-    var allProj = projects(), csvCount = 0, imgCount = 0;
-    var sentMap = await kvGet('imgSynced') || {};
+    var allProj = projects(), csvCount = 0, imgCount = 0, failed = [];
+    var sentMap = await kvGet('imgSynced') || {}, stamp = ymd();
     // 모든 과제의 CSV·사진을 드라이브에 저장 (현재 과제만이 아니라 전체)
     for (var pi = 0; pi < allProj.length; pi++) {
-      var proj = allProj[pi];
+      var proj = allProj[pi], gname = projGroupName(proj), ok = false;
+      // 1) 라벨목록 CSV — 조사값이 아직 없는 과제도 드라이브에 폴더가 만들어지도록 항상 올린다
+      try {
+        var lab = buildLabelCSV(proj);
+        if (lab) {
+          var lr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: gname, fileName: safeName(proj.name) + '_라벨목록_' + stamp + '.csv', csv: lab }, auth));
+          if (lr && lr.ok) { csvCount++; ok = true; }
+        }
+      } catch (e) {}
+      // 2) 야장 CSV — 조사값이 있을 때만
       try {
         var built = await buildCSV(proj);
         if (built) {
-          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: projGroupName(proj), fileName: built.name, csv: built.csv }, auth));
-          if (cr && cr.ok) csvCount++;
+          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: gname, fileName: built.name, csv: built.csv }, auth));
+          if (cr && cr.ok) { csvCount++; ok = true; }
         }
       } catch (e) {}
+      if (!ok) failed.push(proj.name);
       // upload images that haven't been sent yet
       var files = await collectProjImages(proj);
       var pending = files.filter(function (f) { return !sentMap[f.name]; });
@@ -374,12 +387,12 @@
         var f = pending[i];
         if (!silent) toast(proj.name + ' 사진 전송 ' + (i + 1) + '/' + pending.length);
         try {
-          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: projGroupName(proj), fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
+          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: gname, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
           if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); imgCount++; }
         } catch (e) { break; }
       }
     }
-    return { csv: csvCount, images: imgCount };
+    return { csv: csvCount, images: imgCount, projects: allProj.length, failed: failed };
   }
   async function trySync(silent) {
     if (S.settings.syncOn === false) { if (!silent) toast('동기화가 꺼져 있습니다 · 홈에서 켜주세요'); return; }
@@ -409,7 +422,10 @@
       }
       var dr = await syncDrive(url, silent);
       S.lastSync = Date.now(); await kvSet('lastSync', S.lastSync);
-      if (!silent) toast('동기화 완료 · 시트 ' + applied + '건' + (dr.csv ? ' · CSV ' + dr.csv + '개 과제' : '') + (dr.images ? ' · 사진 ' + dr.images + '장' : ''));
+      if (!silent) {
+        if (dr.failed && dr.failed.length) toast('일부 과제 전송 실패 · ' + dr.failed.slice(0, 2).join(', ') + (dr.failed.length > 2 ? ' 외 ' + (dr.failed.length - 2) + '개' : ''));
+        else toast('동기화 완료 · 시트 ' + applied + '건' + (dr.csv ? ' · 드라이브 파일 ' + dr.csv + '개' : '') + (dr.images ? ' · 사진 ' + dr.images + '장' : ''));
+      }
     } catch (e) {
       if (!silent) toast('동기화 실패 · 연결/URL 확인');
     } finally { S.syncing = false; updatePending(); renderCurrent(); }
