@@ -79,7 +79,7 @@ function doPost(e) {
     var body = JSON.parse(e.postData.contents || '{}');
     if (SYNC_TOKEN && body.token !== SYNC_TOKEN) return json_({ok:false, error:'unauthorized'});
 
-    // ===== 드라이브 저장 (CropMemo / 과제명 / …) =====
+    // ===== 드라이브 저장 (CropMemo / [모음 폴더명 /] 과제명 / …) =====
     if (body.action === 'driveCsv')  return json_(saveCsvToDrive_(body));
     if (body.action === 'driveFile') return json_(saveFileToDrive_(body));
 
@@ -223,7 +223,9 @@ function findGenLabel_(genId) {
 // ===== 응답 유틸 =====
 
 /*************************************************************************
- * 드라이브 저장 — CropMemo / <과제명> / 파일
+ * 드라이브 저장 — CropMemo / <과제 모음 폴더명> / <과제명> / 파일
+ *  - 앱에서 과제를 '과제 모음(폴더)'으로 묶었으면 모음 폴더가 한 단계 더 생깁니다.
+ *    묶이지 않은 과제는 예전처럼 CropMemo / <과제명> / 파일 입니다.
  *  - 폴더가 없으면 자동 생성
  *  - CSV: 같은 이름 파일이 있으면 내용을 덮어씀(중복 생성 방지)
  *  - 사진/그림: 같은 이름이 있으면 건너뜀
@@ -234,8 +236,11 @@ function folder_(parent, name) {
   var it = parent.getFoldersByName(name);
   return it.hasNext() ? it.next() : parent.createFolder(name);
 }
-function projFolder_(projName) {
+function projFolder_(projName, group) {
   var root = folder_(DriveApp.getRootFolder(), DRIVE_ROOT);
+  // 과제 모음(폴더)에 묶인 과제는 모음 폴더 아래로 (앱이 group 값을 함께 보냄)
+  var g = String(group == null ? '' : group).trim();
+  if (g) root = folder_(root, sanitizeName_(g));
   return folder_(root, sanitizeName_(projName || '무제'));
 }
 function sanitizeName_(s) {
@@ -247,7 +252,7 @@ function saveCsvToDrive_(body) {
   var name = sanitizeName_(body.fileName || 'export.csv');
   var csv  = String(body.csv || '');
   if (!csv) return { ok:false, error:'empty csv' };
-  var fol  = projFolder_(body.proj);
+  var fol  = projFolder_(body.proj, body.group);
   var blob = Utilities.newBlob('\uFEFF' + csv, 'text/csv', name);
   var it   = fol.getFilesByName(name), file;
   if (it.hasNext()) { file = it.next(); file.setContent('\uFEFF' + csv); }   // 덮어쓰기
@@ -260,7 +265,7 @@ function saveFileToDrive_(body) {
   var name = sanitizeName_(body.fileName || ('img_' + Date.now() + '.jpg'));
   var b64  = String(body.dataB64 || '');
   if (!b64) return { ok:false, error:'empty file' };
-  var fol  = projFolder_(body.proj);
+  var fol  = projFolder_(body.proj, body.group);
   var it   = fol.getFilesByName(name);
   if (it.hasNext()) return { ok:true, skipped:true, name:name };   // 이미 있음
   var blob = Utilities.newBlob(Utilities.base64Decode(b64), body.mime || 'image/jpeg', name);

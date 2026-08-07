@@ -3,6 +3,10 @@
 (function () {
   'use strict';
 
+  // ===== 버전 =====
+  // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.7 = 2026년 8월 7일)
+  var APP_VERSION = '26.8.7';
+
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
   function idb() {
@@ -60,7 +64,7 @@
   function crc32(buf) { if (!_crcT) { _crcT = []; for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; _crcT[n] = c >>> 0; } } var crc = 0 ^ (-1); for (var i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ _crcT[(crc ^ buf[i]) & 0xFF]; return (crc ^ (-1)) >>> 0; }
   function zipStrBytes(s) { var e = unescape(encodeURIComponent(s)), a = new Uint8Array(e.length); for (var i = 0; i < e.length; i++) a[i] = e.charCodeAt(i) & 0xff; return a; }
   function zipNum(n, b) { var a = new Uint8Array(b); for (var i = 0; i < b; i++) { a[i] = n & 0xff; n >>>= 8; } return a; }
-  function makeZip(files) {
+  function zipParts(files) {
     var chunks = [], central = [], offset = 0;
     files.forEach(function (f) {
       var name = zipStrBytes(f.name), crc = crc32(f.data), size = f.data.length;
@@ -72,10 +76,15 @@
     });
     var cstart = offset, clen = 0; central.forEach(function (c) { clen += c.length; });
     var end = new Uint8Array([].concat([0x50, 0x4b, 0x05, 0x06], [0, 0], [0, 0], Array.prototype.slice.call(zipNum(files.length, 2)), Array.prototype.slice.call(zipNum(files.length, 2)), Array.prototype.slice.call(zipNum(clen, 4)), Array.prototype.slice.call(zipNum(cstart, 4)), [0, 0]));
-    var all = chunks.concat(central, [end]), total = 0; all.forEach(function (a) { total += a.length; });
+    return chunks.concat(central, [end]);
+  }
+  function makeZip(files) {
+    var all = zipParts(files), total = 0; all.forEach(function (a) { total += a.length; });
     var out = new Uint8Array(total), p = 0; all.forEach(function (a) { out.set(a, p); p += a.length; });
     return out;
   }
+  // 큰 백업용 — 하나의 큰 배열로 합치지 않고 Blob으로 바로 묶어 메모리 사용을 줄인다
+  function makeZipBlob(files) { return new Blob(zipParts(files), { type: 'application/zip' }); }
   function photosForGen(genId) { return new Promise(function (res) { var out = [], r = os('photos', 'readonly').openCursor(); r.onsuccess = function (e) { var c = e.target.result; if (c) { if (c.value.genId === genId) out.push(c.value); c.continue(); } else { out.sort(function (a, b) { return a.createdAt - b.createdAt; }); res(out); } }; r.onerror = function () { res(out); }; }); }
   function savePhotoFile(p) { var g = curGen(); var url = p.anno || p.orig; downloadBlob(new Blob([dataURLtoBytes(url)], { type: 'image/jpeg' }), photoFileName(g, p)); }
   function round(x, d) { if (x == null || !isFinite(x)) return '—'; var p = Math.pow(10, d || 0); return Math.round(x * p) / p; }
@@ -152,8 +161,9 @@
 
   // ---------- state ----------
   var S = { gens: [], genIdx: 0, lineIdx: 0, indiv: 1, date: null, trait: null, showSelOnly: false,
+            folderOpen: {},   // 과제 모음 펼침 상태 — 저장하지 않음(앱을 새로 열면 모두 접힌 상태)
             indivSel: {}, settings: { syncUrl: '', token: '', deviceId: '' }, vals: {}, lastSaved: null,
-            lastSync: null, pending: 0, syncing: false, view: 'home', showMap: false, traitEdit: false, editIdx: 0, anTrait: null, bulkIdx: 0, bulkStage: 'idle', bulkRows: null, bulkFileName: '', ocr: null, photos: [], photoSel: {}, drawId: null, voice: null, write: null, traitEditFrom: null };
+            lastSync: null, lastBackup: null, pending: 0, syncing: false, view: 'home', showMap: false, traitEdit: false, editIdx: 0, anTrait: null, bulkIdx: 0, bulkStage: 'idle', bulkRows: null, bulkFileName: '', ocr: null, photos: [], photoSel: {}, drawId: null, voice: null, write: null, traitEditFrom: null };
 
   function curGen() { return S.gens[S.genIdx]; }
   // ----- 과제(프로젝트) 그룹: 한 과제 안에 여러 세대 -----
@@ -194,12 +204,14 @@
     var f = { id: 'F' + Date.now(), name: '새 폴더', ids: [aKey, bKey].filter(Boolean) };
     folders().forEach(function (x) { x.ids = x.ids.filter(function (k) { return f.ids.indexOf(k) < 0; }); });
     folders().push(f); cleanFolders();
+    (S.folderOpen = S.folderOpen || {})[f.id] = true;      // 방금 만든 폴더는 펼쳐서 보여준다
     saveFolders().then(function () { renderHome(); renameFolderPopup(f.id, true); });
   }
   function addToFolder(fid, projKey) {
     var f = folderById(fid); if (!f) return;
     folders().forEach(function (x) { x.ids = x.ids.filter(function (k) { return k !== projKey; }); });
     if (f.ids.indexOf(projKey) < 0) f.ids.push(projKey);
+    (S.folderOpen = S.folderOpen || {})[fid] = true;       // 넣은 결과가 바로 보이도록 펼침
     cleanFolders(); saveFolders().then(function () { renderHome(); toast('폴더에 넣음'); });
   }
   function removeFromFolder(projKey) {
@@ -220,6 +232,11 @@
     if ($('fdDel')) $('fdDel').onclick = function () { S.folders = folders().filter(function (x) { return x.id !== fid; }); closeOverlay(); saveFolders().then(function () { renderHome(); toast('폴더 해제됨'); }); };
     $('fdOk').onclick = function () { f.name = (inp.value || '').trim() || f.name; closeOverlay(); saveFolders().then(function () { renderHome(); toast(isNew ? '폴더 생성됨' : '이름 변경됨'); }); };
   }
+  // ----- 저장 경로(과제 모음 폴더 구조) — 기기 백업·ZIP 내보내기·드라이브 동기화가 모두 같은 경로를 쓴다 -----
+  //   모음에 묶인 과제:  CropMemo / 모음폴더명 / 과제명 /
+  //   묶이지 않은 과제:  CropMemo / 과제명 /
+  function projGroupName(p) { var f = folderOf(p && p.id); return f ? safeName(f.name) : ''; }
+  function projDirPath(p) { var gn = projGroupName(p); return (gn ? gn + '/' : '') + safeName(p ? p.name : ''); }
   function curProjKey() { return projKeyOf(curGen()); }
   function genRole(label) { return label === 'F1' ? '조합' : (label === 'F#' ? '범용' : '계통'); }
   function curLine() { return curGen().lines[S.lineIdx]; }
@@ -303,9 +320,10 @@
     } catch (e) { return null; }
   }
   async function odLogout() { await kvSet('odTok', null); toast('OneDrive 연결 해제됨'); renderSettings(); }
-  function odPath(proj, name) { return 'CropMemo/' + safeName(proj) + '/' + safeName(name); }
-  async function odUpload(token, proj, name, data, mime) {
-    var url = 'https://graph.microsoft.com/v1.0/me/drive/root:/' + encodeURI(odPath(proj, name)) + ':/content';
+  // dir = projDirPath(proj) — 모음에 묶였으면 '모음폴더명/과제명', 아니면 '과제명'
+  function odPath(dir, name) { return 'CropMemo/' + dir + '/' + safeName(name); }
+  async function odUpload(token, dir, name, data, mime) {
+    var url = 'https://graph.microsoft.com/v1.0/me/drive/root:/' + encodeURI(odPath(dir, name)) + ':/content';
     var r = await fetch(url, { method: 'PUT', headers: { Authorization: 'Bearer ' + token, 'Content-Type': mime || 'application/octet-stream' }, body: data });
     return r.ok;
   }
@@ -315,8 +333,9 @@
   async function syncOneDrive(proj, silent) {
     var token = await odEnsureToken(silent);
     if (!token) return { ok: false };
+    var dir = projDirPath(proj);
     var built = await buildCSV(proj), csvOk = true;
-    if (built) csvOk = await odUpload(token, proj.name, built.name, new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), 'text/csv');
+    if (built) csvOk = await odUpload(token, dir, built.name, new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), 'text/csv');
     var sent = await kvGet('imgSyncedOD') || {};
     var files = await collectProjImages(proj);
     var pending = files.filter(function (f) { return !sent[f.name]; }), done = 0;
@@ -324,7 +343,7 @@
       if (!silent) toast('사진 전송 ' + (i + 1) + '/' + pending.length);
       try {
         var bytes = dataURLtoBytes(pending[i].url);
-        var ok = await odUpload(token, proj.name, pending[i].name, new Blob([bytes], { type: 'image/jpeg' }), 'image/jpeg');
+        var ok = await odUpload(token, dir, pending[i].name, new Blob([bytes], { type: 'image/jpeg' }), 'image/jpeg');
         if (ok) { sent[pending[i].name] = 1; await kvSet('imgSyncedOD', sent); done++; }
       } catch (e) { break; }
     }
@@ -344,7 +363,7 @@
       try {
         var built = await buildCSV(proj);
         if (built) {
-          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, fileName: built.name, csv: built.csv }, auth));
+          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: projGroupName(proj), fileName: built.name, csv: built.csv }, auth));
           if (cr && cr.ok) csvCount++;
         }
       } catch (e) {}
@@ -355,7 +374,7 @@
         var f = pending[i];
         if (!silent) toast(proj.name + ' 사진 전송 ' + (i + 1) + '/' + pending.length);
         try {
-          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
+          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: projGroupName(proj), fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
           if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); imgCount++; }
         } catch (e) { break; }
       }
@@ -491,6 +510,169 @@
     if (!built) { toast('내보낼 데이터가 없습니다'); return; }
     downloadBlob(new Blob(['\uFEFF' + built.csv], { type: 'text/csv;charset=utf-8' }), built.name);
     toast('CSV ' + built.rows + '행 · 세대 ' + built.gens + '개 내보냄');
+  }
+
+  /* ==========================================================
+   * 기기 백업 — 다운로드 폴더 / Crop Memo Pro / …
+   *   · 과제가 폴더(과제 모음)에 묶여 있으면  Crop Memo Pro/모음폴더명/과제명/
+   *   · 묶이지 않은 과제는                    Crop Memo Pro/과제명/
+   *   담기는 것: 야장 CSV · 라벨목록 CSV · 사진/그림 jpg
+   *   폰 브라우저는 앱이 폴더를 직접 만들 수 없어(보안 정책) 같은 폴더 구조의 ZIP 한 개로 저장한다.
+   *   폴더 선택을 지원하는 브라우저(데스크톱 크롬·엣지)에서는 실제 폴더로 바로 쓴다.
+   * ========================================================== */
+  var BK_ROOT = 'CropMemo';
+  function backupPathOf(p) { return BK_ROOT + '/' + projDirPath(p) + '/'; }
+  function csvLine(row) { return row.map(function (c) { c = (c == null ? '' : String(c)); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(','); }
+  function buildLabelCSV(p) {
+    var rows = [['No.', '과제명', '세대', '라벨번호', '품종명/Pedigree', '반복', '블록', '구역', '개체수', '조합, 계통 선발']], n = 0;
+    p.items.forEach(function (it) {
+      var g = it.g;
+      (g.lines || []).forEach(function (l) {
+        rows.push([++n, p.name, l.gen || g.label, l.label, l.pedigree || '', l.rep || '', l.block || '', l.zone || '', l.indivTotal || '', l.selected ? 'Y' : '']);
+      });
+    });
+    return n ? rows.map(csvLine).join('\r\n') : null;
+  }
+  function txtBytes(s) { return zipStrBytes('﻿' + s); }
+  function bkSize(n) { return n > 1048576 ? (Math.round(n / 104857.6) / 10) + 'MB' : (Math.round(n / 102.4) / 10) + 'KB'; }
+
+  async function buildBackupFiles(onStep) {
+    cleanFolders();
+    var ps = projects();
+    if (!ps.length) return null;
+    var stamp = ymd(), files = [], summary = [], nCsv = 0, nImg = 0, bytes = 0;
+    for (var i = 0; i < ps.length; i++) {
+      var p = ps[i], dir = backupPathOf(p);
+      if (onStep) onStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + ps.length + '\n' + p.name, (i / ps.length) * 0.85);
+      await bkYield();
+      var built = await buildCSV(p);
+      if (built) { files.push({ name: dir + safeName(p.name) + '_야장_' + stamp + '.csv', data: txtBytes(built.csv) }); nCsv++; }
+      var lab = buildLabelCSV(p);
+      if (lab) { files.push({ name: dir + safeName(p.name) + '_라벨목록_' + stamp + '.csv', data: txtBytes(lab) }); nCsv++; }
+      var imgs = await collectProjImages(p);
+      for (var j = 0; j < imgs.length; j++) {
+        try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url) }); nImg++; } catch (e) {}
+        imgs[j].url = null;   // 데이터URL 원본은 바로 놓아준다(메모리 절약)
+      }
+      summary.push('· ' + dir + '\r\n    야장 ' + (built ? built.rows : 0) + '행 · 라벨 ' + p.lines + '개 · 사진 ' + imgs.length + '장');
+    }
+    files.forEach(function (f) { bytes += f.data.length; });
+    var info = 'Crop Memo Pro 기기 백업\r\n백업 일시: ' + new Date().toLocaleString('ko-KR') +
+      '\r\n과제 ' + ps.length + '개 · 파일 ' + files.length + '개 · ' + bkSize(bytes) +
+      '\r\n\r\n[폴더 구조]\r\n' + summary.join('\r\n') +
+      '\r\n\r\nCSV는 UTF-8(BOM) 롱포맷이라 엑셀에서 바로 열립니다.\r\n';
+    files.unshift({ name: BK_ROOT + '/백업정보.txt', data: txtBytes(info) });
+    return { files: files, projects: ps.length, csv: nCsv, img: nImg, bytes: bytes, stamp: stamp };
+  }
+
+  // ----- (선택) 실제 폴더로 쓰기 — File System Access API 지원 브라우저 -----
+  function fsaSupported() { return typeof window.showDirectoryPicker === 'function' && window.isSecureContext; }
+  async function getBackupDir(forcePick) {
+    var h = null;
+    if (!forcePick) { try { h = await kvGet('backupDir'); } catch (e) { h = null; } }
+    if (h) {
+      try {
+        var q = await h.queryPermission({ mode: 'readwrite' });
+        if (q !== 'granted') q = await h.requestPermission({ mode: 'readwrite' });
+        if (q !== 'granted') h = null;
+      } catch (e) { h = null; }
+    }
+    if (!h) {
+      h = await window.showDirectoryPicker({ id: 'cmpro-backup', mode: 'readwrite', startIn: 'downloads' });
+      try { await kvSet('backupDir', h); } catch (e) {}
+    }
+    return h;
+  }
+  async function writeBackupToDir(root, files, onStep) {
+    var cache = {};
+    async function dirFor(path) {
+      if (cache[path]) return cache[path];
+      var h = root, segs = path.split('/').filter(Boolean);
+      for (var i = 0; i < segs.length; i++) h = await h.getDirectoryHandle(segs[i], { create: true });
+      cache[path] = h; return h;
+    }
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i], k = f.name.lastIndexOf('/');
+      var d = await dirFor(k < 0 ? '' : f.name.slice(0, k)), nm = k < 0 ? f.name : f.name.slice(k + 1);
+      var fh = await d.getFileHandle(nm, { create: true });
+      var w = await fh.createWritable();
+      await w.write(f.data); await w.close();
+      if (onStep && (i % 3 === 0)) onStep('폴더에 저장 중 ' + (i + 1) + '/' + files.length, 0.85 + (i / files.length) * 0.15);
+    }
+  }
+
+  // ----- 진행 표시 -----
+  function backupProgress(msg) {
+    var o = openOverlay(
+      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 기기 백업</div>' +
+      '<div class="ovl-msg" id="bkMsg" style="white-space:pre-line;min-height:38px">' + esc(msg) + '</div>' +
+      '<div style="height:8px;border-radius:6px;background:var(--surface-1);overflow:hidden;margin-top:12px"><div id="bkBar" style="height:100%;width:4%;background:var(--green);transition:width .25s"></div></div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">사진이 많으면 시간이 걸립니다. 끝날 때까지 기다려 주세요.</div>'
+    );
+    o.classList.add('lock');   // 진행 중에는 바깥을 눌러도 닫히지 않도록
+  }
+  function bkStep(msg, frac) {
+    var m = $('bkMsg'); if (m) m.textContent = msg;
+    var b = $('bkBar'); if (b) b.style.width = Math.round(Math.max(0.04, Math.min(1, frac || 0)) * 100) + '%';
+  }
+  function bkYield() { return new Promise(function (r) { setTimeout(r, 16); }); }
+
+  function backupPopup() {
+    cleanFolders();
+    var ps = projects();
+    if (!ps.length) { toast('백업할 과제가 없습니다'); return; }
+    var paths = ps.map(backupPathOf);
+    var shown = paths.slice(0, 5).map(function (s) {
+      return '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;word-break:break-all;display:flex;gap:5px;align-items:flex-start">' + ico('folder', '#8C9583', 13) + '<span>' + esc(s) + '</span></div>';
+    }).join('') + (paths.length > 5 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:5px">… 외 ' + (paths.length - 5) + '개</div>' : '');
+    var canDir = fsaSupported();
+    openOverlay(
+      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 기기 백업</div>' +
+      '<div class="ovl-msg">다운로드 폴더에 <b>' + BK_ROOT + '</b> 폴더를 만들고, <b>과제 모음</b>에 묶인 과제는 모음 폴더명으로, 묶이지 않은 과제는 과제명 폴더로 저장합니다.<br><span style="color:var(--text-muted)">과제 ' + ps.length + '개 · 야장 CSV · 라벨목록 CSV · 사진 jpg</span></div>' +
+      '<div style="margin-top:10px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:132px;overflow:auto">' + shown + '</div>' +
+      (canDir ? '' : '<div class="ovl-msg" style="margin-top:10px;color:var(--amber-ink)">폰 브라우저는 앱이 폴더를 직접 만들 수 없어, 위 폴더 구조를 그대로 담은 <b>ZIP 파일 하나</b>를 다운로드 폴더에 저장합니다. 파일을 눌러 <b>압축 풀기</b>를 하면 폴더가 그대로 만들어집니다.</div>') +
+      '<div class="ovl-btns"><button class="btn" id="bkCancel">취소</button>' +
+      (canDir
+        ? '<button class="btn" id="bkZip">ZIP 저장</button><button class="btn primary" id="bkDir">폴더에 저장</button>'
+        : '<button class="btn primary" id="bkZip">' + ico('download', '#fff', 16) + ' 백업 시작</button>') +
+      '</div>'
+    );
+    $('bkCancel').onclick = closeOverlay;
+    $('bkZip').onclick = function () { runBackup(false); };
+    if ($('bkDir')) $('bkDir').onclick = function () { runBackup(true); };
+  }
+
+  async function runBackup(toDir) {
+    var dir = null;
+    if (toDir) {
+      try { dir = await getBackupDir(false); }
+      catch (e) { toast('폴더 선택이 취소되었습니다'); return; }
+    }
+    backupProgress('자료를 모으는 중…');
+    await bkYield();
+    try {
+      var b = await buildBackupFiles(bkStep);
+      if (!b || b.files.length <= 1) { closeOverlay(); toast('백업할 자료가 없습니다'); return; }
+      if (dir) {
+        await writeBackupToDir(dir, b.files, bkStep);
+        closeOverlay();
+        toast('백업 완료 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
+      } else {
+        bkStep('압축하는 중…\n파일 ' + b.files.length + '개 · ' + bkSize(b.bytes), 0.92);
+        await bkYield();
+        var blob = makeZipBlob(b.files);
+        downloadBlob(blob, BK_ROOT + '_백업_' + b.stamp + '.zip');
+        bkStep('저장했습니다', 1);
+        await bkYield();
+        closeOverlay();
+        toast('다운로드 폴더에 저장됨 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
+      }
+      S.lastBackup = Date.now();
+      kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+    } catch (e) {
+      closeOverlay();
+      toast('백업 실패 · ' + ((e && e.message) || '용량이 너무 클 수 있습니다'));
+    }
   }
 
   // ---------- routing ----------
@@ -847,9 +1029,10 @@
   }
   function ico(name, color, size) { return '<i class="ti ti-' + name + '" style="font-size:' + (size || 16) + 'px;color:' + color + '"></i>'; }
   function tm(ts) { var d = new Date(ts); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  function bkWhen(ts) { var d = new Date(ts); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + tm(ts); }
 
   function homeEmptyHTML() {
-    return '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px"><div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div><div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 오프라인</div></div><button class="btn" id="heGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button></div>' +
+    return '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px"><div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div><div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div><button class="btn" id="heGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button></div>' +
       '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button></div>';
   }
   function selectGen(i) { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var g = curGen(); S.date = g.surveyDates[g.surveyDates.length - 1]; S.trait = g.traits[0].id; loadVals().then(function () { go('collect'); }); }
@@ -1186,7 +1369,7 @@
       var ps = f.ids.map(function (k) { return byId[k]; }).filter(Boolean);
       if (!ps.length) return;
       ps.forEach(function (p) { used[p.id] = 1; });
-      var open = S.folderOpen[f.id] !== false;
+      var open = S.folderOpen[f.id] === true;   // 기본은 접힘 · 앱 사용 중 사용자가 연 폴더만 열린 상태 유지
       html += '<div class="hfolder" data-f="' + esc(f.id) + '" style="border:0.5px dashed var(--border-strong);border-radius:12px;padding:8px 8px 2px;margin-bottom:10px;background:var(--surface-1)">' +
         '<div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">' +
           '<button class="btn hfoldtoggle" data-f="' + esc(f.id) + '" style="width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center">' + ico(open ? 'chevron-down' : 'chevron-right', 'var(--text-secondary)', 16) + '</button>' +
@@ -1208,10 +1391,17 @@
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px">' +
         '<div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div>' +
-        '<div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 오프라인</div></div>' +
+        '<div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div>' +
         '<button class="btn" id="hGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button>' +
       '</div>' +
       '<div id="syncStat"></div>' +
+      // 기기 백업 — 다운로드 폴더의 CropMemo 폴더로 저장
+      '<div id="bkCard" style="margin:8px 14px 0;padding:12px 13px;border-radius:12px;background:var(--surface-1);border:0.5px solid var(--border);display:flex;align-items:center;gap:11px;cursor:pointer">' +
+        ico('device-floppy', '#3B6D11', 24) +
+        '<div style="flex:1"><div style="font-size:13px;font-weight:600">기기 백업</div>' +
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + (S.lastBackup ? '마지막 백업 ' + bkWhen(S.lastBackup) : '다운로드 폴더 · CropMemo') + '</div></div>' +
+        ico('chevron-right', 'var(--text-muted)', 18) +
+      '</div>' +
       '<div style="margin:14px 14px 0;padding:14px;border-radius:14px;background:#EAF3DE;border:0.5px solid #CFE0BA">' +
         '<div style="font-size:11px;color:#3B6D11;font-weight:600">이어서 수집</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">' +
@@ -1229,6 +1419,7 @@
       '<div style="height:20px"></div>';
     renderSyncStat($('syncStat'));
     $('syncStat').onclick = function () { if (S.settings.syncOn === false) { toast('동기화가 꺼져 있습니다 · 오른쪽 스위치로 켜세요'); return; } trySync(false); };
+    $('bkCard').onclick = function () { backupPopup(); };
     $('hGear').onclick = function () { go('settings'); };
     $('hResume').onclick = function () { go('collect'); };
     $('hNew').onclick = function () { startNew(); };
@@ -1239,7 +1430,7 @@
     document.querySelectorAll('.hprojcopy').forEach(function (b) { b.onclick = function () { duplicateProjectPopup(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hprojout').forEach(function (b) { b.onclick = function () { removeFromFolder(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hfoldedit').forEach(function (b) { b.onclick = function () { renameFolderPopup(b.getAttribute('data-f')); }; });
-    document.querySelectorAll('.hfoldtoggle').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-f'); S.folderOpen = S.folderOpen || {}; S.folderOpen[id] = (S.folderOpen[id] === false); renderHome(); }; });
+    document.querySelectorAll('.hfoldtoggle').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-f'); S.folderOpen = S.folderOpen || {}; S.folderOpen[id] = !S.folderOpen[id]; renderHome(); }; });
     setupProjDrag();
     function stat(n, label) { return '<div style="flex:1;min-width:0;background:var(--surface-1);border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
     function statP() { return '<div style="flex:1;min-width:0;background:#FAEEDA;border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
@@ -1457,7 +1648,7 @@
     closeOverlay();
     var o = document.createElement('div'); o.className = 'ovl'; o.id = 'ovl';
     o.innerHTML = '<div class="ovl-box">' + html + '</div>';
-    o.addEventListener('click', function (e) { if (e.target === o) closeOverlay(); });
+    o.addEventListener('click', function (e) { if (e.target === o && !o.classList.contains('lock')) closeOverlay(); });
     document.body.appendChild(o);
     return o;
   }
@@ -3010,38 +3201,55 @@
   // ---------- EXPORT ----------
   function renderExport() {
     var g = curGen(), v = $('view-export');
+    var proj = projectOf(curProjKey());
+    var fold = proj ? folderOf(proj.id) : null;                 // 과제 모음(폴더)
+    var dirTxt = 'CropMemo / ' + (fold ? esc(safeName(fold.name)) + ' / ' : '') + esc(safeName(proj ? proj.name : g.projName));
+    var sibs = fold ? fold.ids.length : 0;
     v.innerHTML =
-      '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
+      '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
       '<div style="padding:16px 16px">' +
         '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 <b>과제의 모든 세대</b>를 한 파일에 내보냅니다.<br>열: No. · 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>단위</b> · <b>개체 선발</b> · <b>조합, 계통 선발</b><br>파일명: 과제명_처음라벨-마지막라벨_일자.csv</div>' +
         '<button class="btn primary" id="eCsv" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px">' + ico('file-export', '#fff', 20) + ' CSV 내보내기 (다운로드)</button>' +
         '<button class="btn" id="ePhotos" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('download', 'var(--text-primary)', 20) + ' 사진 다운로드 (jpg 개별저장)</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6"><b>과제의 모든 세대</b> 사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +
-        '<button class="btn" id="eZip" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('photo', 'var(--text-primary)', 20) + ' 사진 ZIP 내보내기</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>CropMemo / ' + esc(g.projName) + ' /</b> 폴더 구조의 ZIP 하나로 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다. 저장 후 드라이브·메일로 공유하세요.</div>' +
+        '<button class="btn" id="eZip" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('photo', 'var(--text-primary)', 20) + ' 사진 ZIP 내보내기 (이 과제)</button>' +
+        (sibs >= 2 ? '<button class="btn" id="eZipG" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('folder', 'var(--text-primary)', 20) + ' 모음 전체 ZIP · ' + esc(fold.name) + ' (과제 ' + sibs + '개)</button>' : '') +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>' + dirTxt + ' /</b> 폴더 구조의 ZIP 하나로 저장합니다.' + (fold ? ' 이 과제는 <b>' + esc(fold.name) + '</b> 모음에 묶여 있어 <b>모음 폴더</b> 아래에 저장됩니다.' : '') + ' 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다. 저장 후 드라이브·메일로 공유하세요.</div>' +
         '<button class="btn" id="eSync" style="width:100%;height:48px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:10px">' + ico('cloud-upload', 'var(--text-primary)', 18) + ' 지금 동기화 (CSV, 사진 전송)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">동기화하면 구글 드라이브 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 설정에서 Apps Script URL을 입력해야 동작하며, 홈의 스위치가 꺼져 있으면 전송되지 않습니다. CSV 내려받기는 오프라인에서도 됩니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">동기화하면 드라이브의 <b>' + dirTxt + '</b> 폴더에 CSV와 사진·그림이 저장됩니다. 과제 모음에 묶인 과제는 <b>CropMemo / 모음 폴더명 / 과제명</b>, 묶이지 않은 과제는 <b>CropMemo / 과제명</b> 폴더입니다. 설정에서 Apps Script URL을 입력해야 동작하며, 홈의 스위치가 꺼져 있으면 전송되지 않습니다. CSV 내려받기는 오프라인에서도 됩니다.</div>' +
       '</div>';
     $('eCsv').onclick = function () { exportCSV(); };
     $('ePhotos').onclick = function () { exportPhotoFiles(); };
-    $('eZip').onclick = function () { exportPhotoZip(); };
+    $('eZip').onclick = function () { exportPhotoZip(false); };
+    if ($('eZipG')) $('eZipG').onclick = function () { exportPhotoZip(true); };
     $('eSync').onclick = function () { trySync(false); };
   }
 
-  function exportPhotoZip() {
+  // groupMode=true 면 이 과제가 속한 모음(폴더)의 모든 과제를 한 ZIP에 담는다
+  //   CropMemo/모음폴더명/과제명/…  ·  묶이지 않은 과제는 CropMemo/과제명/…
+  function exportPhotoZip(groupMode) {
     var proj = projectOf(curProjKey());
     if (!proj) { toast('과제를 찾을 수 없습니다'); return; }
+    var fold = folderOf(proj.id);
+    var list = (groupMode && fold) ? projects().filter(function (p) { return fold.ids.indexOf(p.id) >= 0; }) : [proj];
+    if (!list.length) list = [proj];
     toast('사진 모으는 중…');
-    collectProjImages(proj).then(function (imgs) {
-      if (!imgs.length) { toast('내보낼 사진·그림이 없습니다'); return; }
-      var root = 'CropMemo/' + safeName(proj.name) + '/';
-      var files = [];
-      imgs.forEach(function (im) { try { files.push({ name: root + im.name, data: dataURLtoBytes(im.url) }); } catch (e) {} });
+    var files = [], seq = Promise.resolve();
+    list.forEach(function (p) {
+      seq = seq.then(function () { return collectProjImages(p); }).then(function (imgs) {
+        var root = 'CropMemo/' + projDirPath(p) + '/';
+        imgs.forEach(function (im) {
+          try { files.push({ name: root + im.name, data: dataURLtoBytes(im.url) }); } catch (e) {}
+          im.url = null;
+        });
+      });
+    });
+    seq.then(function () {
       if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
       try {
-        var zip = makeZip(files);
-        downloadBlob(new Blob([zip], { type: 'application/zip' }), 'CropMemo_' + safeName(proj.name) + '_' + ymd() + '.zip');
-        toast(files.length + '개 파일 ZIP 저장됨 · 세대 ' + proj.items.length + '개');
+        var base = (groupMode && fold) ? safeName(fold.name) : safeName(proj.name);
+        downloadBlob(makeZipBlob(files), 'CropMemo_' + base + '_' + ymd() + '.zip');
+        toast(files.length + '개 파일 ZIP 저장됨 · 과제 ' + list.length + '개');
       } catch (e) { toast('ZIP 생성 실패 · 사진이 너무 많을 수 있습니다'); }
     });
   }
@@ -3135,7 +3343,7 @@
         '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('cloud-upload', '#639922', 15) + ' 동기화 방법</div>' +
         (prov === 'gas' ?
         ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
-          '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
+          '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 모음 폴더명 / 과제명</b>(과제 모음에 묶인 경우) 또는 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
           '<b>1.</b> 아래에서 <b>GAS 코드</b>를 내려받습니다.<br>' +
           '<b>2.</b> 브라우저에서 <b>sheets.new</b> 로 새 시트를 만들고 <b>확장 프로그램 → Apps Script</b> 를 엽니다.<br>' +
           '<b>3.</b> 기본 코드를 지우고 내려받은 코드를 <b>붙여넣기</b> 한 뒤, <b>setup</b> 함수를 한 번 실행해 권한을 승인합니다.<br>' +
@@ -3145,7 +3353,7 @@
         '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>')
         :
         ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
-          '연결하면 <b>OneDrive</b>의 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 폴더는 자동으로 만들어집니다.<br><br>' +
+          '연결하면 <b>OneDrive</b>의 <b>CropMemo / 모음 폴더명 / 과제명</b>(과제 모음에 묶인 경우) 또는 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 폴더는 자동으로 만들어집니다.<br><br>' +
           '<b>1.</b> <b>portal.azure.com</b> → <b>Microsoft Entra ID(Azure AD)</b> → <b>앱 등록</b> → <b>새 등록</b>.<br>' +
           '<b>2.</b> 이름은 자유(예: Crop Memo Pro), 계정 유형은 <b>모든 조직 + 개인 Microsoft 계정</b>을 선택합니다.<br>' +
           '<b>3.</b> 리디렉션 URI에서 플랫폼을 <b>단일 페이지 애플리케이션(SPA)</b>으로 고르고, 위에 표시된 <b>리디렉션 주소</b>를 그대로 붙여넣습니다.<br>' +
@@ -3270,6 +3478,7 @@
       S.folders = await kvGet('folders') || [];
       if (window.innerWidth >= 900) S.showMap = true;
       S.lastSync = await kvGet('lastSync') || null;
+      S.lastBackup = await kvGet('lastBackup') || null;
       if (S.genIdx >= S.gens.length) S.genIdx = 0;
       var g = curGen();
       if (g) { S.date = (g.surveyDates && g.surveyDates[g.surveyDates.length - 1]) || todayStr(); S.trait = (g.traits && g.traits[0]) ? g.traits[0].id : null; }
