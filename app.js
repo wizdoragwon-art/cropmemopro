@@ -830,10 +830,11 @@
     if ((view === 'collect' || view === 'export' || view === 'analysis' || view === 'ocr' || view === 'photo' || view === 'draw' || view === 'voice') && !S.gens.length) view = 'home';
     if (view !== 'collect') { S.traitEdit = false; S.traitEditFrom = null; }
     S.view = view;
-    ['home', 'collect', 'export', 'settings', 'new', 'genedit', 'analysis', 'bulk', 'ocr', 'photo', 'draw', 'voice', 'write'].forEach(function (v) {
+    ['home', 'collect', 'export', 'settings', 'new', 'genedit', 'analysis', 'bulk', 'ocr', 'photo', 'draw', 'voice', 'write', 'signup'].forEach(function (v) {
       $('view-' + v).classList.toggle('on', v === view);
     });
     document.querySelectorAll('#tabbar .tab').forEach(function (b) { b.classList.toggle('on', b.getAttribute('data-view') === view); });
+    $('tabbar').classList.toggle('hidden', view === 'signup');
     renderCurrent();
     try { window.dispatchEvent(new Event('cm-nav')); } catch (e) {}
     window.scrollTo(0, 0);
@@ -849,6 +850,7 @@
     else if (S.view === 'bulk') renderBulk();
     else if (S.view === 'ocr') renderOCR();
     else if (S.view === 'photo') renderPhoto();
+    else if (S.view === 'signup') renderSignup();
     else if (S.view === 'draw') renderDraw();
     else if (S.view === 'voice') renderVoice();
     else if (S.view === 'write') renderWrite();
@@ -3778,7 +3780,23 @@
       /* ===== 3. 초기화 ===== */
       '<div style="height:8px"></div>' +
       '<button class="btn" id="sReset" style="width:100%;height:46px;font-size:13.5px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;line-height:1.7;text-align:center">Crop Memo Pro · 버전정보 ' + APP_VERSION + '<br>현장에서 인터넷 없이 저장되고, 연결되면 시트·드라이브로 동기화됩니다.</div>' +
+
+      /* ===== 4. 사용자 기록 (맨 아래) ===== */
+      '<div style="height:20px"></div>' +
+      sect('circle-check', '사용자 기록') +
+      card(
+        '<div style="font-size:12px;color:var(--text-secondary);line-height:1.7">' +
+          (S.user && S.user.email
+            ? '<b style="font-size:13px;color:var(--text-primary)">' + esc(S.user.name || '') + '</b><br>' + esc(S.user.email) +
+              '<br><span style="font-size:11px;color:' + ((S.user.status === 'BLOCKED') ? '#C0392B' : '#3B6D11') + '">' + ((S.user.status === 'BLOCKED') ? '차단됨 · 관리자에게 문의하세요' : '승인됨 (ACTIVE)') + '</span>' +
+              (S.user.at ? '<span style="font-size:11px;color:var(--text-muted)"> · 확인 ' + bkWhen(S.user.at) + '</span>' : '')
+            : '<span style="color:var(--text-muted)">아직 등록하지 않았습니다</span>') + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:10px">' +
+          '<button class="btn" id="sUser" style="flex:1;height:44px;font-size:13.5px;background:var(--surface-2)">' + (S.user && S.user.email ? '등록 정보 수정' : '사용자 등록') + '</button>' +
+          (S.user && S.user.email ? '<button class="btn" id="sUserChk" style="flex:0 0 96px;height:44px;font-size:13px;background:var(--surface-2)">상태 확인</button>' : '') +
+        '</div>'
+      ) +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.7;text-align:center">Crop Memo Pro · 버전정보 ' + APP_VERSION + '<br>현장에서 인터넷 없이 저장되고, 연결되면 시트·드라이브로 동기화됩니다.</div>' +
       '</div>';
 
     document.querySelectorAll('.sProv').forEach(function (b) { b.onclick = function () { st.provider = b.getAttribute('data-v'); kvSet('settings', st).then(function () { renderSettings(); toast(st.provider === 'od' ? 'OneDrive 저장으로 전환' : '구글 드라이브 저장으로 전환'); }); }; });
@@ -3818,6 +3836,11 @@
     }
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     if ($('sGuide')) $('sGuide').onclick = function () { openGuide(); };
+    if ($('sUser')) $('sUser').onclick = function () { go('signup'); };
+    if ($('sUserChk')) $('sUserChk').onclick = function () {
+      toast('상태 확인 중…');
+      guardUser().then(function (st) { renderSettings(); if (st !== 'BLOCKED') toast('승인됨 (ACTIVE)'); });
+    };
     if ($('sHelpHead')) $('sHelpHead').onclick = function () { S.setHelpOpen = !S.setHelpOpen; renderSettings(); };
     // 기기 백업 폴더 — 지금 기억하고 있는 폴더 보여주기
     (async function () {
@@ -3962,6 +3985,9 @@
     var o = document.getElementById('guideOvl'); if (o) o.remove();
     S.guide = null;
     if (markSeen !== false) kvSet('guideSeen', true);
+    // 가이드가 끝나면 아직 등록하지 않은 사용자는 등록 화면으로
+    if (!S.user || !S.user.email) go('signup');
+    else guardUser();
   }
   function renderGuide() {
     var G = S.guide; if (!G) return;
@@ -4473,8 +4499,113 @@
     };
   }
 
+
+  /* ==========================================================
+   * 사용자 등록 · 상태 확인
+   *   구글 시트(Users 탭)에 이메일·사용자명·상태(ACTIVE/BLOCKED)를 두고,
+   *   앱을 열 때 상태를 확인해 차단된 사용자는 화면을 덮어 막는다.
+   *   오프라인이거나 서버에 닿지 못하면 '승인'으로 보고 그대로 진행한다.
+   * ========================================================== */
+  // ↓↓↓ Apps Script(사용자 관리) 웹앱 /exec 주소를 여기에 붙여 넣으세요 ↓↓↓
+  var USER_API = 'https://script.google.com/macros/s/AKfycbxAUwpEu5-ngPRq88jf-WPV8D2Kt163kxDQvpTs3AqUAQa6BFuWzK0rpldnJNarEwY/exec';
+  // ↑↑↑ 비워 두면 등록만 기기에 저장되고 상태 확인은 건너뜁니다 ↑↑↑
+
+  function userApi() { return (USER_API || (S.settings && S.settings.userUrl) || '').trim(); }
+  function postUser(payload) {
+    var url = userApi(); if (!url) return Promise.reject(new Error('no-url'));
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+      .then(function (r) { return r.json(); });
+  }
+  function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim()); }
+
+  // ----- 등록 화면 -----
+  function renderSignup() {
+    var v = $('view-signup'), u = S.user || {};
+    v.innerHTML =
+      '<div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:26px 22px">' +
+        '<div style="width:56px;height:56px;border-radius:16px;background:#639922;display:flex;align-items:center;justify-content:center;margin-bottom:16px">' + ico('plant-2', '#fff', 30) + '</div>' +
+        '<div style="font-size:21px;font-weight:700">사용자 등록</div>' +
+        '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:8px">이메일과 사용자명을 입력하면 바로 시작합니다.<br>등록 정보는 연구소 관리자가 사용 현황을 확인하는 데 쓰입니다.</div>' +
+        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:22px">이메일</label>' +
+        '<input class="ein" id="suEmail" type="email" inputmode="email" autocomplete="email" style="margin-top:6px" placeholder="name@company.com" value="' + esc(u.email || '') + '">' +
+        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">사용자명</label>' +
+        '<input class="ein" id="suName" autocomplete="name" style="margin-top:6px" placeholder="예) 홍길동" value="' + esc(u.name || '') + '">' +
+        '<div id="suMsg" style="font-size:12px;color:#B0721A;margin-top:10px;min-height:18px"></div>' +
+        '<button class="btn primary" id="suOk" style="width:100%;height:52px;font-size:15px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('check', '#fff', 19) + ' 등록하고 시작하기</button>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">인터넷이 없어도 등록됩니다. 연결되면 자동으로 서버에 반영됩니다.</div>' +
+      '</div>';
+    var em = $('suEmail'), nm = $('suName');
+    $('suOk').onclick = async function () {
+      var email = (em.value || '').trim().toLowerCase(), name = (nm.value || '').trim();
+      var msg = $('suMsg');
+      if (!validEmail(email)) { msg.textContent = '이메일 주소를 확인해 주세요.'; em.focus(); return; }
+      if (!name) { msg.textContent = '사용자명을 입력해 주세요.'; nm.focus(); return; }
+      msg.style.color = 'var(--text-muted)'; msg.textContent = '등록 중…';
+      this.disabled = true;
+      var status = 'ACTIVE';
+      try {
+        var j = await postUser({ action: 'register', email: email, name: name, deviceId: S.settings.deviceId, app: APP_VERSION });
+        if (j && j.ok) status = String(j.status || 'ACTIVE').toUpperCase();
+      } catch (e) { /* 오프라인·미설정 — 승인으로 보고 진행 */ }
+      S.user = { email: email, name: name, status: status, at: Date.now() };
+      await kvSet('user', S.user);
+      if (status === 'BLOCKED') { showBlocked(); return; }
+      toast('등록되었습니다 · ' + name);
+      go('home');
+    };
+    setTimeout(function () { try { (u.email ? nm : em).focus(); } catch (e) {} }, 200);
+  }
+
+  // ----- 차단 안내 (화면 전체 덮기) -----
+  function showBlocked() {
+    if (document.getElementById('blockOvl')) return;
+    var u = S.user || {};
+    var o = document.createElement('div');
+    o.id = 'blockOvl'; o.className = 'blockovl';
+    o.innerHTML =
+      '<div class="blockbox">' +
+        '<div class="blockic">' + ico('lock', '#fff', 34) + '</div>' +
+        '<div class="blocktitle">사용이 제한되었습니다</div>' +
+        '<div class="blockmsg">이 계정은 현재 <b>차단</b> 상태입니다.<br>연구소 <b>관리자에게 문의 바랍니다.</b></div>' +
+        '<div class="blockwho">' + esc(u.name || '') + (u.email ? ' · ' + esc(u.email) : '') + '</div>' +
+        '<button class="btn" id="blkRetry" style="width:100%;height:46px;font-size:14px;margin-top:16px">다시 확인</button>' +
+      '</div>';
+    document.body.appendChild(o);
+    $('blkRetry').onclick = function () {
+      var b = $('blkRetry'); b.textContent = '확인 중…';
+      checkUserStatus(true).then(function (st) {
+        if (st !== 'BLOCKED') { o.remove(); toast('사용이 다시 허용되었습니다'); }
+        else { b.textContent = '다시 확인'; toast('아직 차단 상태입니다'); }
+      });
+    };
+  }
+
+  // ----- 상태 확인 -----
+  //   ACTIVE / BLOCKED / UNKNOWN(오프라인·미설정·오류 → 승인으로 간주)
+  async function checkUserStatus(force) {
+    var u = S.user; if (!u || !u.email) return 'NONE';
+    if (!navigator.onLine || !userApi()) return u.status || 'ACTIVE';
+    try {
+      var j = await postUser({ action: 'status', email: u.email, name: u.name, deviceId: S.settings.deviceId, app: APP_VERSION });
+      if (j && j.ok) {
+        var st = String(j.status || 'ACTIVE').toUpperCase();
+        u.status = st; u.at = Date.now(); await kvSet('user', u);
+        return st;
+      }
+    } catch (e) { /* 연결 실패 — 마지막으로 알던 상태 유지 */ }
+    return u.status || 'ACTIVE';
+  }
+
+  // 앱을 열 때 / 다시 온라인이 될 때 상태를 확인한다
+  async function guardUser() {
+    var st = await checkUserStatus();
+    if (st === 'BLOCKED') showBlocked();
+    else { var o = document.getElementById('blockOvl'); if (o) o.remove(); }
+    return st;
+  }
+
   // ---------- net ----------
-  function onNet() { if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
+  function onNet() { if (navigator.onLine && S.user && S.user.email) guardUser(); if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
 
   // ---------- boot ----------
   // ---------- Android 뒤로가기 ----------
@@ -4572,10 +4703,13 @@
       document.querySelectorAll('#tabbar .tab').forEach(function (b) { b.onclick = function () { go(b.getAttribute('data-view')); }; });
       window.addEventListener('online', onNet); window.addEventListener('offline', onNet);
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
+      S.user = await kvGet('user') || null;
       go('home');
       setupBack();
-      // 첫 실행이면 사용 가이드를 띄운다 (마지막 장에서 '다음부터 보지 않기'로 끌 수 있음)
+      // 첫 실행이면 사용 가이드를 띄우고, 가이드가 끝나면 사용자 등록 화면으로 넘어간다
       if (!(await kvGet('guideSeen'))) setTimeout(openGuide, 450);
+      else if (!S.user || !S.user.email) go('signup');
+      else guardUser();
       if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl) trySync(true);
     } catch (err) { showBootError(err); }
   }

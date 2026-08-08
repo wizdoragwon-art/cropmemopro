@@ -189,3 +189,11 @@ a{color:var(--green-d)}
 .gbox{width:19px;height:19px;border-radius:5px;border:1.5px solid var(--border-strong);background:var(--surface-2);flex:0 0 auto;
   display:flex;align-items:center;justify-content:center}
 .gchk.on .gbox{background:var(--green);border-color:var(--green-d)}
+
+/* ===== 사용 제한(차단) 안내 ===== */
+.blockovl{position:fixed;inset:0;background:rgba(18,22,16,.88);display:flex;align-items:center;justify-content:center;z-index:300;padding:24px}
+.blockbox{background:var(--surface-2);border-radius:18px;padding:26px 20px 20px;width:100%;max-width:340px;text-align:center;box-shadow:0 14px 36px rgba(0,0,0,.4)}
+.blockic{width:66px;height:66px;border-radius:20px;background:#C0392B;display:flex;align-items:center;justify-content:center;margin:0 auto 14px}
+.blocktitle{font-size:18px;font-weight:700;margin-bottom:8px}
+.blockmsg{font-size:13.5px;color:var(--text-secondary);line-height:1.75}
+.blockwho{font-size:11px;color:var(--text-muted);margin-top:12px}
