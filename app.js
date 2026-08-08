@@ -4525,7 +4525,7 @@
       '<div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:26px 22px">' +
         '<div style="width:56px;height:56px;border-radius:16px;background:#639922;display:flex;align-items:center;justify-content:center;margin-bottom:16px">' + ico('plant-2', '#fff', 30) + '</div>' +
         '<div style="font-size:21px;font-weight:700">사용자 등록</div>' +
-        '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:8px">이메일과 사용자명을 입력하면 바로 시작합니다.<br>등록 정보는 연구소 관리자가 사용 현황을 확인하는 데 쓰입니다.</div>' +
+        '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:8px">이메일과 사용자명을 입력하면 바로 시작합니다.<br>등록 정보는 앱 개선 및 관리 목적으로 사용됩니다.<br>최초 한번 등록시 추가 등록 없이 홈 화면으로 실행됩니다.</div>' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:22px">이메일</label>' +
         '<input class="ein" id="suEmail" type="email" inputmode="email" autocomplete="email" style="margin-top:6px" placeholder="name@company.com" value="' + esc(u.email || '') + '">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">사용자명</label>' +
@@ -4559,7 +4559,6 @@
   // ----- 차단 안내 (화면 전체 덮기) -----
   function showBlocked() {
     if (document.getElementById('blockOvl')) return;
-    var u = S.user || {};
     var o = document.createElement('div');
     o.id = 'blockOvl'; o.className = 'blockovl';
     o.innerHTML =
@@ -4567,7 +4566,6 @@
         '<div class="blockic">' + ico('lock', '#fff', 34) + '</div>' +
         '<div class="blocktitle">사용이 제한되었습니다</div>' +
         '<div class="blockmsg">이 계정은 현재 <b>차단</b> 상태입니다.<br>연구소 <b>관리자에게 문의 바랍니다.</b></div>' +
-        '<div class="blockwho">' + esc(u.name || '') + (u.email ? ' · ' + esc(u.email) : '') + '</div>' +
         '<button class="btn" id="blkRetry" style="width:100%;height:46px;font-size:14px;margin-top:16px">다시 확인</button>' +
       '</div>';
     document.body.appendChild(o);
