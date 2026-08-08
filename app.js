@@ -377,7 +377,7 @@
     for (var i = 0; i < pending.length; i++) {
       if (!silent) toast('사진 전송 ' + (i + 1) + '/' + pending.length);
       try {
-        var bytes = dataURLtoBytes(pending[i].url);
+        var bytes = dataURLtoBytes(await syncPhotoURL(pending[i].url));
         var ok = await odUpload(token, dir, pending[i].name, new Blob([bytes], { type: 'image/jpeg' }), 'image/jpeg');
         if (ok) { sent[pending[i].name] = 1; await kvSet('imgSyncedOD', sent); done++; }
       } catch (e) { break; }
@@ -419,7 +419,8 @@
         var f = pending[i];
         if (!silent) toast(proj.name + ' 사진 전송 ' + (i + 1) + '/' + pending.length);
         try {
-          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: gname, fileName: f.name, mime: 'image/jpeg', dataB64: String(f.url).split(',')[1] || '' }, auth));
+          var sendUrl = await syncPhotoURL(f.url);
+          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: gname, fileName: f.name, mime: 'image/jpeg', dataB64: String(sendUrl).split(',')[1] || '' }, auth));
           if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); imgCount++; }
         } catch (e) { break; }
       }
@@ -3600,52 +3601,103 @@
   }
 
   // ---------- SETTINGS ----------
+  // 동기화로 보낼 때 쓸 사진 화질 (기본: 저장된 그대로)
+  function syncPhotoQ() { return PHOTO_Q[(S.settings && S.settings.syncPhotoQ) || 'orig'] || PHOTO_Q.orig; }
+  // 데이터URL 사진을 정해진 크기로 줄인다 ('원본'이면 그대로 돌려준다)
+  function shrinkDataURL(url, dim, q) {
+    return new Promise(function (res) {
+      try {
+        var img = new Image();
+        img.onload = function () {
+          var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+          var sc = Math.min(1, dim / Math.max(w, h || 1));
+          if (sc >= 1) { res(url); return; }
+          var c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(w * sc)); c.height = Math.max(1, Math.round(h * sc));
+          var cx = c.getContext('2d'); cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = 'high';
+          cx.drawImage(img, 0, 0, c.width, c.height);
+          try { res(c.toDataURL('image/jpeg', q)); } catch (e) { res(url); }
+        };
+        img.onerror = function () { res(url); };
+        img.src = url;
+      } catch (e) { res(url); }
+    });
+  }
+  function syncPhotoURL(url) {
+    var pq = syncPhotoQ();
+    if (pq.orig) return Promise.resolve(url);
+    return shrinkDataURL(url, pq.dim, pq.q);
+  }
+
   function renderSettings() {
     var v = $('view-settings'), st = S.settings, prov = st.provider || 'gas';
+    function sect(icon, title, sub) {
+      return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><div style="width:26px;height:26px;border-radius:8px;background:var(--green-t);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico(icon, '#3B6D11', 15) + '</div>' +
+        '<div style="font-size:15px;font-weight:700">' + title + '</div></div>' +
+        (sub ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">' + sub + '</div>' : '<div style="height:8px"></div>');
+    }
+    function card(inner) { return '<div style="background:var(--surface-1);border:0.5px solid var(--border);border-radius:13px;padding:13px 13px;margin-bottom:12px">' + inner + '</div>'; }
+    function qTiles(cls, cur, note) {
+      return '<div style="display:flex;gap:8px;margin-top:9px">' +
+        ['low', 'orig'].map(function (k) {
+          var on = (cur === k), o = PHOTO_Q[k];
+          return '<button class="btn ' + cls + '" data-q="' + k + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px;background:var(--surface-2)' + (on ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + o.name +
+            '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? '#3B6D11' : 'var(--text-muted)') + '">' + (note && note[k] ? note[k] : o.sub) + '</span></button>';
+        }).join('') + '</div>';
+    }
+
     v.innerHTML =
       '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">설정</div></div>' +
-      '<div style="padding:16px 16px">' +
+      '<div style="padding:16px 14px 26px">' +
+
+      /* ===== 1. 백업 ===== */
+      sect('device-floppy', '백업', '조사 자료를 기기와 사무실로 남깁니다') +
+      card(
+        '<div style="font-size:13px;font-weight:600">기기 백업 폴더</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px" id="sBkDirNow">확인 중…</div>' +
+        '<div style="display:flex;gap:8px;margin-top:9px">' +
+          '<button class="btn" id="sBkDir" style="flex:1;height:46px;font-size:14px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;gap:7px">' + ico('folder', 'var(--text-primary)', 18) + ' 폴더 선택</button>' +
+          '<button class="btn" id="sBkDirClear" style="flex:0 0 80px;height:46px;font-size:13px;background:var(--surface-2)">해제</button>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">홈의 <b>기기 백업</b>을 누르면 이 폴더에 바로 저장됩니다.</div>'
+      ) +
+      card(
+        '<div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:600">동기화 사용</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">끄면 기기에만 저장됩니다 (홈에서도 전환 가능)</div></div><div class="sw' + (st.syncOn !== false ? ' on' : '') + '" id="sSyncOn"><div class="knob"></div></div></div>' +
+        '<div style="height:1px;background:var(--border);margin:12px 0"></div>' +
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">저장 위치</div>' +
-        '<div style="display:flex;gap:8px;margin-bottom:16px">' +
-          '<button class="btn sProv" data-v="gas" style="flex:1;height:42px;font-size:13px' + (prov === 'gas' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">구글 드라이브</button>' +
-          '<button class="btn sProv" data-v="od" style="flex:1;height:42px;font-size:13px' + (prov === 'od' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">OneDrive</button>' +
+        '<div style="display:flex;gap:8px">' +
+          '<button class="btn sProv" data-v="gas" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'gas' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">구글 드라이브</button>' +
+          '<button class="btn sProv" data-v="od" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'od' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">OneDrive</button>' +
         '</div>' +
         (prov === 'gas' ?
-          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500">동기화 URL <span style="color:var(--text-muted);font-weight:400">(Apps Script 웹앱 /exec)</span></label>' +
-           '<input class="ein" id="sUrl" style="margin-top:6px" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(st.syncUrl) + '">' +
-           '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택 · SYNC_TOKEN과 일치)</span></label>' +
-           '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">')
+          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">동기화 URL <span style="color:var(--text-muted);font-weight:400">(Apps Script 웹앱 /exec)</span></label>' +
+           '<input class="ein" id="sUrl" style="margin-top:6px" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(st.syncUrl) + '">')
           :
-          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500">OneDrive 클라이언트 ID <span style="color:var(--text-muted);font-weight:400">(Azure 앱 등록 후 발급)</span></label>' +
+          ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">OneDrive 클라이언트 ID <span style="color:var(--text-muted);font-weight:400">(Azure 앱 등록 후 발급)</span></label>' +
            '<input class="ein" id="sOdCid" style="margin-top:6px" placeholder="예) 12ab34cd-56ef-78ab-90cd-1234567890ab" value="' + esc(st.odClientId || '') + '">' +
+           '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택)</span></label>' +
+           '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">' +
            '<div style="display:flex;gap:8px;margin-top:10px">' +
              '<button class="btn primary" id="sOdLogin" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('cloud-upload', '#fff', 17) + ' OneDrive 연결</button>' +
-             '<button class="btn" id="sOdOut" style="flex:0 0 96px;height:46px;font-size:13px">연결 해제</button>' +
+             '<button class="btn" id="sOdOut" style="flex:0 0 96px;height:46px;font-size:13px;background:var(--surface-2)">연결 해제</button>' +
            '</div>' +
            '<div id="sOdStat" style="font-size:11px;color:var(--text-muted);margin-top:8px">연결 상태 확인 중…</div>' +
            '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">리디렉션 주소(Azure에 등록): <b style="word-break:break-all">' + esc(odRedirect()) + '</b></div>')
         ) +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">기기 ID: ' + esc(st.deviceId) + '</div>' +
-        '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">동기화 사용</div><div style="font-size:11px;color:var(--text-muted)">끄면 기기에만 저장됩니다 (홈에서도 전환 가능)</div></div><div class="sw' + (st.syncOn !== false ? ' on' : '') + '" id="sSyncOn"><div class="knob"></div></div></div>' +
-        '<div style="margin-top:18px"><div style="font-size:13px;font-weight:500">사진 화질</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">높일수록 선명하지만 저장 용량과 전송 시간이 늘어납니다</div>' +
-          '<div style="display:flex;gap:8px;margin-top:9px">' +
-            ['low', 'orig'].map(function (k) {
-              var on = ((st.photoQ || 'orig') === k), o = PHOTO_Q[k];
-              return '<button class="btn sPhotoQ" data-q="' + k + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px' + (on ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + o.name +
-                '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? '#3B6D11' : 'var(--text-muted)') + '">' + o.sub + '</span></button>';
-            }).join('') +
-          '</div>' +
-          '<div style="font-size:11px;color:var(--text-muted);margin-top:8px" id="sStore">기기 저장 사용량 확인 중…</div></div>' +
-        '<div style="display:flex;align-items:center;gap:10px;margin-top:16px"><div style="flex:1"><div style="font-size:13px;font-weight:500">진동 피드백</div><div style="font-size:11px;color:var(--text-muted)">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>' +
-        '<div style="display:flex;gap:10px;margin-top:16px">' +
-          '<button class="btn" id="sPing" style="flex:1;height:46px;font-size:14px">연결 테스트</button>' +
+        '<div style="height:1px;background:var(--border);margin:14px 0"></div>' +
+        '<div style="font-size:13px;font-weight:600">동기화 전송 사진 화질</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">동기화로 <b>보낼 때만</b> 적용됩니다. 기기에 저장된 사진은 그대로입니다.</div>' +
+        qTiles('sSyncQ', st.syncPhotoQ || 'orig', { low: '2600px로 줄여 전송', orig: '저장된 그대로 전송' }) +
+        '<div style="display:flex;gap:10px;margin-top:14px">' +
+          '<button class="btn" id="sPing" style="flex:1;height:46px;font-size:14px;background:var(--surface-2)">연결 테스트</button>' +
           '<button class="btn primary" id="sSave" style="flex:1;height:46px;font-size:14px">저장</button>' +
         '</div>' +
-        '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
-        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('cloud-upload', '#639922', 15) + ' 동기화 방법</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + ' · 기기 ID ' + esc(st.deviceId) + '</div>'
+      ) +
+      card(
+        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('info-circle', '#639922', 14) + ' 동기화 방법</div>' +
         (prov === 'gas' ?
-        ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
+        ('<div style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
           '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 모음 폴더명 / 과제명</b>(과제 모음에 묶인 경우) 또는 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
           '<b>1.</b> 아래에서 <b>GAS 코드</b>를 내려받습니다.<br>' +
           '<b>2.</b> 브라우저에서 <b>sheets.new</b> 로 새 시트를 만들고 <b>확장 프로그램 → Apps Script</b> 를 엽니다.<br>' +
@@ -3653,26 +3705,41 @@
           '<b>4.</b> <b>배포 → 새 배포 → 웹 앱</b>, 액세스 권한을 <b>모든 사용자</b>로 두고 배포합니다.<br>' +
           '<b>5.</b> 생성된 <b>/exec 주소</b>를 위 <b>동기화 URL</b> 칸에 붙여넣고 저장 → <b>연결 테스트</b>로 확인합니다.' +
         '</div>' +
-        '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>')
+        '<button class="btn" id="sGas" style="width:100%;height:46px;font-size:14px;margin-top:10px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 17) + ' GAS 코드 내려받기 (.gs)</button>')
         :
-        ('<div class="card" style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
+        ('<div style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
           '연결하면 <b>OneDrive</b>의 <b>CropMemo / 모음 폴더명 / 과제명</b>(과제 모음에 묶인 경우) 또는 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장됩니다. 폴더는 자동으로 만들어집니다.<br><br>' +
           '<b>1.</b> <b>portal.azure.com</b> → <b>Microsoft Entra ID(Azure AD)</b> → <b>앱 등록</b> → <b>새 등록</b>.<br>' +
           '<b>2.</b> 이름은 자유(예: Crop Memo Pro), 계정 유형은 <b>모든 조직 + 개인 Microsoft 계정</b>을 선택합니다.<br>' +
           '<b>3.</b> 리디렉션 URI에서 플랫폼을 <b>단일 페이지 애플리케이션(SPA)</b>으로 고르고, 위에 표시된 <b>리디렉션 주소</b>를 그대로 붙여넣습니다.<br>' +
           '<b>4.</b> 등록 후 <b>API 사용 권한 → Microsoft Graph → 위임된 권한</b>에서 <b>Files.ReadWrite</b>, <b>offline_access</b>를 추가합니다.<br>' +
           '<b>5.</b> 개요 화면의 <b>애플리케이션(클라이언트) ID</b>를 복사해 위 칸에 붙여넣고 <b>OneDrive 연결</b>을 누릅니다.' +
-          '<br><br><span style="color:#8A5A12">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다. 회사 계정은 관리자 승인이 한 번 필요할 수 있습니다.</span>' +
-        '</div>')) +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">저장 위치는 언제든 위에서 바꿀 수 있습니다. 동기화를 쓰지 않으려면 홈 화면의 스위치를 꺼두세요.</div>' +
-        '<div style="height:1px;background:var(--border);margin:20px 0"></div>' +
-        '<div style="font-size:13px;font-weight:600;margin-bottom:6px">데이터</div>' +
-        '<div style="font-size:12px;color:var(--text-secondary)">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + '</div>' +
-        '<button class="btn" id="sGuide" style="width:100%;height:48px;font-size:14px;margin-top:18px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('bulb', 'var(--text-primary)', 18) + ' 사용 가이드 다시 보기</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">앱 화면을 순서대로 보여주는 첫 실행 안내입니다. 언제든 다시 볼 수 있습니다.</div>' +
-        '<button class="btn" id="sReset" style="width:100%;height:44px;font-size:13px;margin-top:18px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:18px;line-height:1.7">Crop Memo Pro · 오프라인 우선 PWA<br>현장에서 인터넷 없이 저장되고, 연결되면 Google Sheets로 동기화됩니다.</div>' +
+          '<br><br><span style="color:#8A5A12">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다.</span>' +
+        '</div>')) ) +
+
+      /* ===== 2. 기기 설정 ===== */
+      '<div style="height:8px"></div>' +
+      sect('device-mobile', '기기 설정', '이 기기에서만 적용됩니다') +
+      card(
+        '<div style="font-size:13px;font-weight:600">야장 저장 사진 화질</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">촬영한 사진을 기기에 저장할 때의 화질입니다</div>' +
+        qTiles('sPhotoQ', st.photoQ || 'orig') +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px" id="sStore">기기 저장 사용량 확인 중…</div>'
+      ) +
+      card(
+        '<div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:600">진동 피드백</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>'
+      ) +
+      card(
+        '<button class="btn" id="sGuide" style="width:100%;height:46px;font-size:14px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;gap:7px">' + ico('bulb', 'var(--text-primary)', 18) + ' 사용 가이드 다시 보기</button>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">앱 화면을 순서대로 보여주는 첫 실행 안내입니다.</div>'
+      ) +
+
+      /* ===== 3. 초기화 ===== */
+      '<div style="height:8px"></div>' +
+      '<button class="btn" id="sReset" style="width:100%;height:46px;font-size:13.5px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:16px;line-height:1.7;text-align:center">Crop Memo Pro · 버전정보 ' + APP_VERSION + '<br>현장에서 인터넷 없이 저장되고, 연결되면 시트·드라이브로 동기화됩니다.</div>' +
       '</div>';
+
     document.querySelectorAll('.sProv').forEach(function (b) { b.onclick = function () { st.provider = b.getAttribute('data-v'); kvSet('settings', st).then(function () { renderSettings(); toast(st.provider === 'od' ? 'OneDrive 저장으로 전환' : '구글 드라이브 저장으로 전환'); }); }; });
     if ($('sOdCid')) $('sOdCid').oninput = function () { st.odClientId = this.value.trim(); };
     if ($('sOdLogin')) $('sOdLogin').onclick = function () { st.odClientId = ($('sOdCid').value || '').trim(); kvSet('settings', st).then(function () { odLogin(); }); };
@@ -3695,7 +3762,10 @@
     };
     $('sSyncOn').onclick = function () { st.syncOn = (st.syncOn === false); this.classList.toggle('on', st.syncOn !== false); kvSet('settings', st).then(function () { toast(st.syncOn !== false ? '동기화 켜짐' : '동기화 꺼짐'); }); };
     document.querySelectorAll('.sPhotoQ').forEach(function (b) {
-      b.onclick = function () { st.photoQ = b.getAttribute('data-q'); kvSet('settings', st).then(function () { renderSettings(); toast('사진 화질 · ' + PHOTO_Q[st.photoQ].name); }); };
+      b.onclick = function () { st.photoQ = b.getAttribute('data-q'); kvSet('settings', st).then(function () { renderSettings(); toast('야장 저장 사진 화질 · ' + PHOTO_Q[st.photoQ].name); }); };
+    });
+    document.querySelectorAll('.sSyncQ').forEach(function (b) {
+      b.onclick = function () { st.syncPhotoQ = b.getAttribute('data-q'); kvSet('settings', st).then(function () { renderSettings(); toast('동기화 전송 사진 화질 · ' + PHOTO_Q[st.syncPhotoQ].name); }); };
     });
     if ($('sStore') && navigator.storage && navigator.storage.estimate) {
       navigator.storage.estimate().then(function (e) {
@@ -3706,7 +3776,27 @@
       }).catch(function () {});
     }
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
-    $('sGuide').onclick = function () { openGuide(); };
+    // 기기 백업 폴더 — 지금 기억하고 있는 폴더 보여주기
+    (async function () {
+      var el = $('sBkDirNow'); if (!el) return;
+      if (!fsaSupported()) { el.textContent = '이 브라우저는 폴더 선택을 지원하지 않아 ZIP 파일로 저장됩니다'; if ($('sBkDir')) { $('sBkDir').style.opacity = '.45'; } return; }
+      var h = null; try { h = await kvGet('backupDir'); } catch (e) {}
+      if (h && (await dirPerm(h, false)) === 'granted' && (await dirAlive(h))) el.textContent = '지금 저장 폴더 · ' + (h.name || '(이름 없음)');
+      else el.textContent = '아직 고르지 않았습니다 · 백업할 때 폴더 선택창이 뜹니다';
+    })();
+    $('sBkDir').onclick = async function () {
+      if (!fsaSupported()) { toast('이 브라우저는 폴더 선택을 지원하지 않습니다'); return; }
+      try {
+        var h = await getBackupDir(true);
+        toast('백업 폴더 · ' + (h.name || '선택됨'));
+        renderSettings();
+      } catch (e) { toast('폴더 선택이 취소되었습니다'); }
+    };
+    $('sBkDirClear').onclick = async function () {
+      try { await kvSet('backupDir', null); } catch (e) {}
+      toast('백업 폴더 선택을 해제했습니다');
+      renderSettings();
+    };
     $('sReset').onclick = async function () {
       if (!(await askConfirm('모든 로컬 데이터를 삭제할까요?\n되돌릴 수 없습니다.', { title: '초기화', danger: true, ok: '모두 삭제' }))) return;
       indexedDB.deleteDatabase(DB_NAME);
@@ -3733,9 +3823,9 @@
     cMapWrap: { x: 3.4,  y: 8.8,  w: 93.2, h: 30.8 },
     eProjAll: { x: 3.9,  y: 12.2, w: 92.2, h: 5.8 },
     eAllZip:  { x: 3.9,  y: 44.1, w: 92.2, h: 5.8 },
-    sUrl:     { x: 3.9,  y: 19.5, w: 92.2, h: 4.9 },
-    sSyncOn:  { x: 83.4, y: 37.6, w: 13,   h: 4.2 },
-    sPhotoQ:  { x: 3.4,  y: 48.2, w: 93.2, h: 7.1 }
+    sBkDir:   { x: 6.3,  y: 19.9, w: 87.4, h: 5.8 },
+    sUrl:     { x: 6.3,  y: 50.4, w: 87.4, h: 5.5 },
+    sSyncQ:   { x: 6.3,  y: 63.6, w: 87.4, h: 7.1 }
   };
   function gc(key, n, side, label) { var b = GBOX[key]; return { x: b.x, y: b.y, w: b.w, h: b.h, n: n, side: side || 'left', label: label || '' }; }
 
@@ -3792,10 +3882,10 @@
         body: '<b>①</b> 지금 보고 있는 과제만 — 파일 한 묶음(CSV·사진) · CSV만 · 사진만 · 사진 골라서<br><b>②</b> 모든 과제 — 파일 한 묶음 · CSV만 · 사진만',
         calls: [gc('eProjAll', 1), gc('eAllZip', 2)] },
 
-      { img: '15-settings', chap: '설정', title: '동기화 연결 · 사진 화질',
-        body: '<b>①</b> Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 구글 시트·드라이브로 자동 전송됩니다. 오프라인에서는 기기에 쌓였다가 연결되는 순간 한 번에 올라갑니다.<br><b>②</b> <b>사진 화질</b> — 기본은 <b>원본</b>(재압축 없음)이고, 용량을 줄이려면 <b>저화질</b>을 고르세요.',
-        note: '설정 맨 아래 <사용 가이드 다시 보기>로 이 안내를 언제든 다시 볼 수 있습니다.',
-        calls: [gc('sUrl', 1), gc('sPhotoQ', 2)] },
+      { img: '15-settings', chap: '설정', title: '백업 · 기기 설정',
+        body: '설정은 <b>백업</b>(기기 백업 폴더 · 동기화)과 <b>기기 설정</b>(사진 화질 · 진동 · 가이드 다시 보기)으로 나뉩니다.<br><b>①</b> 기기 백업 폴더를 미리 골라 두면 홈에서 누르는 즉시 저장됩니다.<br><b>②</b> Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 자동 전송됩니다.<br><b>③</b> <b>동기화 전송 사진 화질</b> — 보낼 때만 줄입니다(기기 저장본은 그대로).',
+        note: '기기에 저장할 사진 화질과 사용 가이드 다시 보기는 아래 <기기 설정>에 있습니다.',
+        calls: [gc('sBkDir', 1), gc('sUrl', 2), gc('sSyncQ', 3)] },
 
       { img: '16-backup', chap: '기기 백업', title: '내 기기에 자료 백업 하기',
         body: '홈의 <b>기기 백업</b>을 누르면 백업 폴더 선택 후 백업이 진행 됩니다. 전체 과제의 모든 데이터, 사진 자료가 저장됩니다.',
