@@ -3488,6 +3488,39 @@
     };
   }
 
+  // 내보낼 과제 고르기 — 조사 화면으로 넘어가지 않고 현재 과제만 바꾼다
+  function pickProjectPopup(after) {
+    cleanFolders();
+    var all = projects(), cur = curProjKey();
+    if (all.length <= 1) { toast('과제가 하나뿐입니다'); return; }
+    var rows = all.map(function (p) {
+      var f = folderOf(p.id), on = (p.id === cur);
+      return '<button class="btn ppRow" data-p="' + esc(p.id) + '" style="width:100%;text-align:left;padding:11px 12px;margin-top:7px;background:var(--surface-2);display:flex;align-items:center;gap:9px' + (on ? ';border-color:#639922;background:#EAF3DE' : '') + '">' +
+        '<div style="width:4px;height:30px;border-radius:2px;background:' + (p.color || '#639922') + ';flex:0 0 auto"></div>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600' + (on ? ';color:#27500A' : '') + '">' + esc(p.name) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + (f ? esc(f.name) + ' · ' : '') + '세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
+        (on ? ico('check', '#3B6D11', 17) : '') + '</button>';
+    }).join('');
+    var o = openOverlay(
+      '<div class="ovl-title">' + ico('clipboard-list', '#3B6D11', 18) + ' 과제 고르기</div>' +
+      '<div style="max-height:52vh;overflow:auto;margin-top:4px">' + rows + '</div>' +
+      '<div class="ovl-btns"><button class="btn" id="ppCancel">취소</button></div>'
+    );
+    $('ppCancel').onclick = closeOverlay;
+    o.querySelectorAll('.ppRow').forEach(function (b) {
+      b.onclick = function () {
+        var p = projectOf(b.getAttribute('data-p'));
+        closeOverlay();
+        if (!p || !p.items.length) return;
+        S.genIdx = p.items[0].idx; S.lineIdx = 0; S.indiv = 1;
+        var g = curGen();
+        S.date = (g.surveyDates && g.surveyDates[g.surveyDates.length - 1]) || todayStr();
+        S.trait = (g.traits && g.traits[0]) ? g.traits[0].id : null;
+        loadVals().then(function () { if (after) after(); toast('과제 · ' + p.name); });
+      };
+    });
+  }
+
   // ---------- EXPORT ----------
   function renderExport() {
     var g = curGen(), v = $('view-export');
@@ -3498,10 +3531,14 @@
         ico(icon, primary ? '#fff' : 'var(--text-primary)', 19) + ' ' + text + '</button>';
     }
     v.innerHTML =
-      '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
+      '<div style="padding:16px 16px 12px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div></div>' +
       '<div style="padding:14px 16px 24px">' +
-        '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">' + ico('clipboard-list', '#639922', 16) + ' 선택 과제 내보내기</div>' +
+        '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
+          '<span style="font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">' + ico('clipboard-list', '#639922', 16) + ' 선택 과제 내보내기</span>' +
+          '<button class="btn" id="ePickProj" style="flex:1;min-width:0;height:32px;padding:0 10px;font-size:12px;display:flex;align-items:center;gap:5px;background:#EAF3DE;border-color:#CFE0BA;color:#27500A;font-weight:600">' +
+            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + '</span>' +
+            ico('chevron-down', '#3B6D11', 15) + '</button>' +
+        '</div>' +
         btn('eProjAll', 'file-zip', '선택 과제 파일 (CSV, 사진) 다운로드', true) +
         btn('eCsv', 'file-type-csv', '선택 과제 CSV 다운로드') +
         btn('eZip', 'photo', '선택 과제 사진 ZIP 다운로드') +
@@ -3512,6 +3549,7 @@
         btn('eAllCsv', 'file-type-csv', '전체 과제 CSV 파일 다운로드') +
         btn('eAllPhoto', 'photo', '전체 사진 ZIP 다운로드') +
       '</div>';
+    $('ePickProj').onclick = function () { pickProjectPopup(function () { renderExport(); }); };
     $('eProjAll').onclick = function () { exportProjBundle(); };
     $('eCsv').onclick = function () { exportCSV(); };
     $('eZip').onclick = function () { exportPhotoZip(false); };
@@ -3651,7 +3689,7 @@
       '<div style="padding:16px 14px 26px">' +
 
       /* ===== 1. 백업 ===== */
-      sect('device-floppy', '백업', '조사 자료를 기기와 사무실로 남깁니다') +
+      sect('device-floppy', '백업') +
       card(
         '<div style="font-size:13px;font-weight:600">기기 백업 폴더</div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:2px" id="sBkDirNow">확인 중…</div>' +
@@ -3695,7 +3733,10 @@
         '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + ' · 기기 ID ' + esc(st.deviceId) + '</div>'
       ) +
       card(
-        '<div style="font-size:13px;font-weight:600;margin-bottom:8px">' + ico('info-circle', '#639922', 14) + ' 동기화 방법</div>' +
+        '<div id="sHelpHead" style="display:flex;align-items:center;gap:6px;cursor:pointer">' + ico('info-circle', '#639922', 14) +
+          '<span style="font-size:13px;font-weight:600;flex:1">동기화 방법</span>' +
+          ico(S.setHelpOpen ? 'chevron-down' : 'chevron-right', 'var(--text-muted)', 16) + '</div>' +
+        (!S.setHelpOpen ? '' : '<div style="margin-top:10px">' +
         (prov === 'gas' ?
         ('<div style="font-size:12px;color:var(--text-secondary);line-height:1.85">' +
           '동기화하면 구글 <b>드라이브</b>의 <b>CropMemo / 모음 폴더명 / 과제명</b>(과제 모음에 묶인 경우) 또는 <b>CropMemo / 과제명</b> 폴더에 CSV와 사진·그림이 저장되고, 조사값은 시트에도 쌓입니다.<br><br>' +
@@ -3715,7 +3756,7 @@
           '<b>4.</b> 등록 후 <b>API 사용 권한 → Microsoft Graph → 위임된 권한</b>에서 <b>Files.ReadWrite</b>, <b>offline_access</b>를 추가합니다.<br>' +
           '<b>5.</b> 개요 화면의 <b>애플리케이션(클라이언트) ID</b>를 복사해 위 칸에 붙여넣고 <b>OneDrive 연결</b>을 누릅니다.' +
           '<br><br><span style="color:#8A5A12">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다.</span>' +
-        '</div>')) ) +
+        '</div>')) + '</div>') ) +
 
       /* ===== 2. 기기 설정 ===== */
       '<div style="height:8px"></div>' +
@@ -3776,6 +3817,8 @@
       }).catch(function () {});
     }
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
+    if ($('sGuide')) $('sGuide').onclick = function () { openGuide(); };
+    if ($('sHelpHead')) $('sHelpHead').onclick = function () { S.setHelpOpen = !S.setHelpOpen; renderSettings(); };
     // 기기 백업 폴더 — 지금 기억하고 있는 폴더 보여주기
     (async function () {
       var el = $('sBkDirNow'); if (!el) return;
@@ -3821,11 +3864,11 @@
     cMap:     { x: 78.4, y: 0.9,  w: 18.7, h: 3.3 },
     cQuick:   { x: 1.5,  y: 58.1, w: 97,   h: 5.4 },
     cMapWrap: { x: 3.4,  y: 8.8,  w: 93.2, h: 30.8 },
-    eProjAll: { x: 3.9,  y: 12.2, w: 92.2, h: 5.8 },
+    eProjAll: { x: 3.9,  y: 12.1, w: 92.2, h: 5.8 },
     eAllZip:  { x: 3.9,  y: 44.1, w: 92.2, h: 5.8 },
-    sBkDir:   { x: 6.3,  y: 19.9, w: 87.4, h: 5.8 },
-    sUrl:     { x: 6.3,  y: 50.4, w: 87.4, h: 5.5 },
-    sSyncQ:   { x: 6.3,  y: 63.6, w: 87.4, h: 7.1 }
+    sBkDir:   { x: 6.3,  y: 18.0, w: 87.4, h: 5.8 },
+    sUrl:     { x: 6.3,  y: 48.5, w: 87.4, h: 5.5 },
+    sSyncQ:   { x: 6.3,  y: 61.6, w: 87.4, h: 7.1 }
   };
   function gc(key, n, side, label) { var b = GBOX[key]; return { x: b.x, y: b.y, w: b.w, h: b.h, n: n, side: side || 'left', label: label || '' }; }
 
