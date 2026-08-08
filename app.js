@@ -1294,6 +1294,7 @@
     var out = WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color }; });
     var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41'];
     S.gens.forEach(function (x) { if (x.crop && !out.some(function (o) { return o.name === x.crop; })) out.push({ name: x.crop, color: x.color || pal[out.length % pal.length] }); });
+    if (!out.some(function (o) { return o.name === '미분류'; })) out.push({ name: '미분류', color: '#8C9583' });
     if (S.geCrop && !out.some(function (o) { return o.name === S.geCrop; })) out.push({ name: S.geCrop, color: S.geColor || '#639922' });
     return out;
   }
@@ -3902,11 +3903,36 @@
       (s.lineRows || []).forEach(function (r) { labels[pick(r, '라벨번호')] = 1; });
       s.obsRows.forEach(function (r) { labels[pick(r, '라벨번호')] = 1; });
       delete labels[''];
+      var gcp = guessCrop(s.proj) || guessCrop(s.group);
+      s.crop = gcp ? gcp.name : '미분류';
       s.nLabels = Object.keys(labels).length;
       s.nObs = s.obsRows.length;
       s.nPhotos = s.photos.length;
     });
     return out.filter(function (s) { return s.nLabels || s.nPhotos; });
+  }
+
+  // ----- 과제명에서 작물 알아내기 -----
+  //   '26년 고추 탄저병 시험' → 고추 · 기본 작물 6종과 이미 쓰고 있는 작물명 중에서 찾는다
+  function cropCandidates() {
+    var out = WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color }; });
+    S.gens.forEach(function (g) {
+      if (g.crop && g.crop !== '미분류' && !out.some(function (o) { return o.name === g.crop; })) out.push({ name: g.crop, color: g.color || '#639922' });
+    });
+    return out.sort(function (a, b) { return b.name.length - a.name.length; });   // 긴 이름부터 (얼갈이배추 > 배추)
+  }
+  function guessCrop(text) {
+    var txt = String(text || ''); if (!txt) return null;
+    var list = cropCandidates(), han = /[가-힣]/;
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i], k = txt.indexOf(c.name);
+      if (k < 0) continue;
+      if (c.name.length >= 2) return c;
+      // '무' 같은 한 글자 작물은 앞뒤가 한글이면 다른 낱말의 일부로 보고 넘어간다 (무름병 등)
+      var prev = k > 0 ? txt.charAt(k - 1) : '', next = txt.charAt(k + c.name.length) || '';
+      if (!han.test(prev) && !han.test(next)) return c;
+    }
+    return null;
   }
 
   // ----- 계획대로 과제를 만든다 -----
@@ -3941,6 +3967,8 @@
       if (onStep) onStep('과제 만드는 중 ' + (pi + 1) + '/' + plan.length + '\n' + s.proj, 0.6 + (pi / plan.length) * 0.35);
       await bkYield();
       var projName = uniqName(s.proj), projId = 'P' + base + '_' + pi;
+      var gc = guessCrop(s.proj) || guessCrop(s.group);            // 과제명 → 없으면 모음 폴더명에서
+      var cropName = gc ? gc.name : '미분류', cropColor = gc ? gc.color : '#8C9583';
 
       // 1) 형질 — 야장 CSV의 형질명·단위에서
       var traitOrder = [], traitVals = {}, traitUnit = {}, traitDates = {}, traitKind = {};
@@ -4027,7 +4055,7 @@
           lineKeyToId[(l.gen || '') + '|' + l.label + '|' + (l.rep || '')] = { gid: gid, id: id };
           return { id: id, label: l.label, pedigree: l.pedigree, rep: l.rep, block: l.block, zone: l.zone, row: Math.floor(li / 10) + 1, col: (li % 10) + 1, indivTotal: l.indivTotal, selected: !!l.selected };
         });
-        newGens.push({ id: gid, projId: projId, projName: projName, crop: '', color: '#639922', label: gl, prefix: (lines[0] && String(lines[0].label).split('-')[0]) || '', surveyDates: dlist.slice(), traits: JSON.parse(JSON.stringify(traits)), lines: lines });
+        newGens.push({ id: gid, projId: projId, projName: projName, crop: cropName, color: cropColor, label: gl, prefix: (lines[0] && String(lines[0].label).split('-')[0]) || '', surveyDates: dlist.slice(), traits: JSON.parse(JSON.stringify(traits)), lines: lines });
         madeGen++;
       });
       S.gens = S.gens.concat(newGens);
@@ -4167,7 +4195,7 @@
     var rows = plan.slice(0, 6).map(function (s) {
       return '<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:6px">' + ico(s.group ? 'folder' : 'clipboard-list', '#639922', 13) +
         '<div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-all">' + (s.group ? esc(s.group) + ' / ' : '') + esc(s.proj) + '</div>' +
-        '<div style="color:var(--text-muted);font-size:11px">라벨 ' + s.nLabels + ' · 조사값 ' + s.nObs + ' · 사진 ' + s.nPhotos + '</div></div></div>';
+        '<div style="color:var(--text-muted);font-size:11px">' + esc(s.crop || '미분류') + ' · 라벨 ' + s.nLabels + ' · 조사값 ' + s.nObs + ' · 사진 ' + s.nPhotos + '</div></div></div>';
     }).join('') + (plan.length > 6 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">… 외 ' + (plan.length - 6) + '개</div>' : '');
     openOverlay(
       '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 불러올 과제 ' + plan.length + '개</div>' +
@@ -4257,6 +4285,7 @@
       var mig = false;
       gens.forEach(function (g) {
         if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; }
+        if (g.crop === '불러옴' || g.crop === '불러오기') { g.crop = '미분류'; g.color = '#8C9583'; mig = true; }
         // 기존 프로젝트의 숫자 등급 척도에 '판독불가' 자동 보강(이미 있으면 유지)
         (g.traits || []).forEach(function (t) {
           if (t.type === 'rating') { var before = (t.scale || []).length; t.scale = withUnreadable(t.scale); if (t.scale.length !== before) mig = true; }
