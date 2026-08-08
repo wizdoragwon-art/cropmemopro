@@ -3370,35 +3370,156 @@
     $('voNote').onclick = function () { var nt = traitByName('비고'); var txt = (($('voManual') && $('voManual').value) || vo.transcript || '').trim(); if (!txt) { toast('내용을 입력하세요'); return; } if (!nt) { toast('비고 형질이 없습니다'); return; } setVal(nt.id, txt).then(function () { toast('비고 저장됨'); }); };
   }
 
+  // ----- 내보내기 묶음 만들기 (기기 백업과 같은 폴더 구조) -----
+  //   opts: { csv, labels, photos } — 담을 것 고르기
+  async function projExportFiles(p, stamp, opts) {
+    var dir = backupPathOf(p), now = Date.now(), out = [], rows = 0, imgs = [];
+    if (opts.csv !== false) {
+      var built = await buildCSV(p);
+      if (built) { out.push({ name: dir + safeName(p.name) + '_야장_' + stamp + '.csv', data: txtBytes(built.csv), mtime: now }); rows = built.rows; }
+    }
+    if (opts.labels !== false) {
+      var lab = buildLabelCSV(p);
+      if (lab) out.push({ name: dir + safeName(p.name) + '_라벨목록_' + stamp + '.csv', data: txtBytes(lab), mtime: now });
+    }
+    if (opts.photos !== false) {
+      imgs = await collectProjImages(p);
+      for (var j = 0; j < imgs.length; j++) {
+        try { out.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts, photo: true }); } catch (e) {}
+        imgs[j].url = null;
+      }
+    }
+    return { files: out, rows: rows, photos: imgs.length };
+  }
+
+  // 여러 과제를 모아 ZIP 하나로 저장
+  async function exportBundle(list, opts, zipName, label) {
+    if (!list || !list.length) { toast('내보낼 과제가 없습니다'); return; }
+    backupProgress('자료를 모으는 중…');
+    await bkYield();
+    try {
+      var stamp = ymd(), files = [], nPhoto = 0;
+      for (var i = 0; i < list.length; i++) {
+        bkStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + list.length + '\n' + list[i].name, (i / list.length) * 0.85);
+        await bkYield();
+        var r = await projExportFiles(list[i], stamp, opts);
+        files = files.concat(r.files); nPhoto += r.photos;
+      }
+      if (!files.length) { closeOverlay(); toast('내보낼 자료가 없습니다'); return; }
+      var bytes = 0; files.forEach(function (f) { bytes += f.data.length; });
+      bkStep('압축하는 중…\n파일 ' + files.length + '개 · ' + bkSize(bytes), 0.92);
+      await bkYield();
+      downloadBlob(makeZipBlob(files), zipName.replace('{d}', stamp) + '.zip');
+      closeOverlay();
+      toast(label + ' 저장됨 · 파일 ' + files.length + '개' + (nPhoto ? ' (사진 ' + nPhoto + '장)' : ''));
+    } catch (e) {
+      closeOverlay();
+      toast('내보내기 실패 · ' + ((e && e.name === 'QuotaExceededError') ? '저장 공간이 부족합니다' : '자료가 너무 많을 수 있습니다'));
+    }
+  }
+
+  function curProject() { return projectOf(curProjKey()); }
+  function exportProjBundle() {
+    var p = curProject(); if (!p) { toast('과제를 찾을 수 없습니다'); return; }
+    exportBundle([p], {}, 'CropMemo_' + safeName(p.name) + '_{d}', '선택 과제 파일');
+  }
+  function exportAllBundle() {
+    cleanFolders();
+    exportBundle(projects(), {}, 'CropMemo_전체과제_{d}', '전체 과제 파일');
+  }
+  function exportAllCSV() {
+    cleanFolders();
+    exportBundle(projects(), { photos: false }, 'CropMemo_전체과제_CSV_{d}', '전체 과제 CSV');
+  }
+  function exportAllPhotoZip() {
+    cleanFolders();
+    exportBundle(projects(), { csv: false, labels: false }, 'CropMemo_전체사진_{d}', '전체 사진');
+  }
+
+  // ----- 사진 개별 선택 다운로드 -----
+  function photoPickerPopup() {
+    var p = curProject(); if (!p) { toast('과제를 찾을 수 없습니다'); return; }
+    toast('사진 모으는 중…');
+    collectProjImages(p).then(function (imgs) {
+      if (!imgs.length) { toast('내보낼 사진·그림이 없습니다'); return; }
+      S.pick = { imgs: imgs, sel: {} };
+      renderPhotoPicker();
+    });
+  }
+  function renderPhotoPicker() {
+    var K = S.pick; if (!K) return;
+    var nSel = Object.keys(K.sel).filter(function (k) { return K.sel[k]; }).length;
+    var cells = K.imgs.map(function (im, i) {
+      var on = !!K.sel[i];
+      return '<div class="pkCell" data-i="' + i + '" style="position:relative;border-radius:9px;overflow:hidden;border:2.5px solid ' + (on ? 'var(--green)' : 'transparent') + ';cursor:pointer;background:var(--surface-1)">' +
+        '<img src="' + im.url + '" style="width:100%;aspect-ratio:1;object-fit:cover;display:block">' +
+        '<div style="position:absolute;left:5px;top:5px;width:20px;height:20px;border-radius:5px;background:' + (on ? 'var(--green)' : 'rgba(255,255,255,.85)') + ';border:1px solid ' + (on ? 'var(--green-d)' : 'var(--border-strong)') + ';display:flex;align-items:center;justify-content:center">' + (on ? ico('check', '#fff', 13) : '') + '</div>' +
+        '</div>';
+    }).join('');
+    var o = openOverlay(
+      '<div class="ovl-title">' + ico('photo', '#3B6D11', 18) + ' 사진 고르기 <span style="font-size:12px;font-weight:400;color:var(--text-muted)">' + nSel + '/' + K.imgs.length + '</span></div>' +
+      '<div style="margin-top:10px;max-height:46vh;overflow:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' + cells + '</div>' +
+      '<div class="ovl-btns"><button class="btn" id="pkAll" style="flex:0 0 92px">' + (nSel === K.imgs.length ? '모두 해제' : '전체선택') + '</button>' +
+      '<button class="btn" id="pkCancel">취소</button>' +
+      '<button class="btn primary" id="pkOk"' + (nSel ? '' : ' style="opacity:.45"') + '>' + nSel + '장 저장</button></div>'
+    );
+    o.querySelectorAll('.pkCell').forEach(function (el) {
+      el.onclick = function () { var i = +el.getAttribute('data-i'); K.sel[i] = !K.sel[i]; renderPhotoPicker(); };
+    });
+    $('pkAll').onclick = function () {
+      var all = nSel === K.imgs.length;
+      K.sel = {}; if (!all) K.imgs.forEach(function (x, i) { K.sel[i] = true; });
+      renderPhotoPicker();
+    };
+    $('pkCancel').onclick = function () { S.pick = null; closeOverlay(); };
+    $('pkOk').onclick = async function () {
+      var idx = Object.keys(K.sel).filter(function (k) { return K.sel[k]; }).map(Number);
+      if (!idx.length) { toast('사진을 고르세요'); return; }
+      closeOverlay();
+      if (idx.length > 5 && !(await askConfirm(idx.length + '장을 다운로드 폴더에 저장할까요?\n(브라우저가 여러 파일 저장 허용을 물어볼 수 있습니다)', { title: '사진 저장', ok: '저장' }))) { S.pick = null; return; }
+      for (var n = 0; n < idx.length; n++) {
+        var im = K.imgs[idx[n]];
+        try { downloadBlob(new Blob([dataURLtoBytes(im.url)], { type: 'image/jpeg' }), im.name); } catch (e) {}
+        await new Promise(function (r) { setTimeout(r, 160); });
+      }
+      toast(idx.length + '장 저장됨');
+      S.pick = null;
+    };
+  }
+
   // ---------- EXPORT ----------
   function renderExport() {
     var g = curGen(), v = $('view-export');
-    var proj = projectOf(curProjKey());
-    var fold = proj ? folderOf(proj.id) : null;                 // 과제 모음(폴더)
-    var dirTxt = 'CropMemo / ' + (fold ? esc(safeName(fold.name)) + ' / ' : '') + esc(safeName(proj ? proj.name : g.projName));
-    var sibs = fold ? fold.ids.length : 0;
+    var proj = curProject(), fold = proj ? folderOf(proj.id) : null;
+    var nProj = projects().length;
+    function btn(id, icon, text, primary) {
+      return '<button class="btn' + (primary ? ' primary' : '') + '" id="' + id + '" style="width:100%;height:52px;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:9px">' +
+        ico(icon, primary ? '#fff' : 'var(--text-primary)', 19) + ' ' + text + '</button>';
+    }
     v.innerHTML =
-      '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
-      '<div style="padding:16px 16px">' +
-        '<div class="card" style="line-height:1.8;font-size:13px;color:var(--text-secondary)">CSV(UTF-8 BOM · 엑셀 호환) 롱포맷으로 <b>과제의 모든 세대</b>를 한 파일에 내보냅니다.<br>열: No. · 라벨번호 · 세대 · 반복 · 개체 · <b>조사일</b> · 형질 · 값 · <b>단위</b> · <b>개체 선발</b> · <b>조합, 계통 선발</b><br>파일명: 과제명_처음라벨-마지막라벨_일자.csv</div>' +
-        '<button class="btn primary" id="eCsv" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px">' + ico('file-export', '#fff', 20) + ' CSV 내보내기 (다운로드)</button>' +
-        '<button class="btn" id="ePhotos" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('download', 'var(--text-primary)', 20) + ' 사진 다운로드 (jpg 개별저장)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6"><b>과제의 모든 세대</b> 사진·손글씨를 <b>다운로드 폴더</b>에 jpg로 하나씩 저장합니다. 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다.</div>' +
-        '<button class="btn" id="eZip" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('photo', 'var(--text-primary)', 20) + ' 사진 ZIP 내보내기 (이 과제)</button>' +
-        (sibs >= 2 ? '<button class="btn" id="eZipG" style="width:100%;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px">' + ico('folder', 'var(--text-primary)', 20) + ' 모음 전체 ZIP · ' + esc(fold.name) + ' (과제 ' + sibs + '개)</button>' : '') +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">사진·손글씨를 <b>' + dirTxt + ' /</b> 폴더 구조의 ZIP 하나로 저장합니다.' + (fold ? ' 이 과제는 <b>' + esc(fold.name) + '</b> 모음에 묶여 있어 <b>모음 폴더</b> 아래에 저장됩니다.' : '') + ' 파일명은 <b>과제명_라벨번호_개체번호_형질_촬영일자.jpg</b> 입니다. 저장 후 드라이브·메일로 공유하세요.</div>' +
-        '<button class="btn" id="eSync" style="width:100%;height:48px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:10px">' + ico('cloud-upload', 'var(--text-primary)', 18) + ' 지금 동기화 (CSV, 사진 전송)</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px">동기화하면 드라이브의 <b>' + dirTxt + '</b> 폴더에 CSV와 사진·그림이 저장됩니다. 과제 모음에 묶인 과제는 <b>CropMemo / 모음 폴더명 / 과제명</b>, 묶이지 않은 과제는 <b>CropMemo / 과제명</b> 폴더입니다. 설정에서 Apps Script URL을 입력해야 동작하며, 홈의 스위치가 꺼져 있으면 전송되지 않습니다. CSV 내려받기는 오프라인에서도 됩니다.</div>' +
+      '<div style="padding:16px 16px 10px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + ' · ' + esc(g.label) + '</div></div>' +
+      '<div style="padding:14px 16px 24px">' +
+        '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">' + ico('clipboard-list', '#639922', 16) + ' 선택 과제 내보내기</div>' +
+        btn('eProjAll', 'file-zip', '선택 과제 파일 (CSV, 사진) 다운로드', true) +
+        btn('eCsv', 'file-type-csv', '선택 과제 CSV 다운로드') +
+        btn('eZip', 'photo', '선택 과제 사진 ZIP 다운로드') +
+        btn('ePick', 'checks', '사진 개별 선택 다운로드') +
+        '<div style="height:22px"></div>' +
+        '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">' + ico('layout-grid', '#639922', 16) + ' 전체 과제 내보내기 <span style="font-weight:400;color:var(--text-muted);font-size:11px">과제 ' + nProj + '개</span></div>' +
+        btn('eAllZip', 'file-zip', '전체 과제 파일 ZIP 다운로드', true) +
+        btn('eAllCsv', 'file-type-csv', '전체 과제 CSV 파일 다운로드') +
+        btn('eAllPhoto', 'photo', '전체 사진 ZIP 다운로드') +
       '</div>';
+    $('eProjAll').onclick = function () { exportProjBundle(); };
     $('eCsv').onclick = function () { exportCSV(); };
-    $('ePhotos').onclick = function () { exportPhotoFiles(); };
     $('eZip').onclick = function () { exportPhotoZip(false); };
-    if ($('eZipG')) $('eZipG').onclick = function () { exportPhotoZip(true); };
-    $('eSync').onclick = function () { trySync(false); };
+    $('ePick').onclick = function () { photoPickerPopup(); };
+    $('eAllZip').onclick = function () { exportAllBundle(); };
+    $('eAllCsv').onclick = function () { exportAllCSV(); };
+    $('eAllPhoto').onclick = function () { exportAllPhotoZip(); };
   }
 
-  // groupMode=true 면 이 과제가 속한 모음(폴더)의 모든 과제를 한 ZIP에 담는다
-  //   CropMemo/모음폴더명/과제명/…  ·  묶이지 않은 과제는 CropMemo/과제명/…
   function exportPhotoZip(groupMode) {
     var proj = projectOf(curProjKey());
     if (!proj) { toast('과제를 찾을 수 없습니다'); return; }
@@ -3610,10 +3731,11 @@
     cMap:     { x: 78.4, y: 0.9,  w: 18.7, h: 3.3 },
     cQuick:   { x: 1.5,  y: 58.1, w: 97,   h: 5.4 },
     cMapWrap: { x: 3.4,  y: 8.8,  w: 93.2, h: 30.8 },
-    eCsv:     { x: 3.9,  y: 26.8, w: 92.2, h: 5.8 },
-    eZip:     { x: 3.9,  y: 45.5, w: 92.2, h: 5.8 },
+    eProjAll: { x: 3.9,  y: 12.2, w: 92.2, h: 5.8 },
+    eAllZip:  { x: 3.9,  y: 44.1, w: 92.2, h: 5.8 },
     sUrl:     { x: 3.9,  y: 19.5, w: 92.2, h: 4.9 },
-    sSyncOn:  { x: 83.4, y: 37.6, w: 13,   h: 4.2 }
+    sSyncOn:  { x: 83.4, y: 37.6, w: 13,   h: 4.2 },
+    sPhotoQ:  { x: 3.4,  y: 48.2, w: 93.2, h: 7.1 }
   };
   function gc(key, n, side, label) { var b = GBOX[key]; return { x: b.x, y: b.y, w: b.w, h: b.h, n: n, side: side || 'left', label: label || '' }; }
 
@@ -3625,7 +3747,7 @@
 
       { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기 · 불러오기',
         body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽에서 <b>+ 새 과제</b>로 새로 만들고, <b>불러오기</b>로 기기에 백업해 둔 과제를 되살립니다.',
-        note: '생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
+        note: '불러오기는 백업 ZIP · 과제/모음 폴더 · CSV를 받습니다. 생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
         calls: [gc('hNew', 1, 'left'), gc('hLoad', 2, 'right')] },
 
       { img: '03-wizard1', chap: '과제 생성 3단계 · 1 / 3', title: '① 과제 정보',
@@ -3659,20 +3781,21 @@
 
       { img: '09-collect', chap: '기록 도구', title: '사진 · 그리기 · 음성',
         body: '조사 화면 아래 세 버튼입니다. 개체에 <b>사진</b>을 붙이고, 그 위에 <b>표시를 그리고</b>, 손이 바쁠 땐 <b>음성</b>으로 비고를 남깁니다.',
-        note: "사진은 '과제명_라벨번호_개체번호_형질_일자'로 기록되고, 모음 폴더에 묶인 과제는 모음 폴더 아래에 저장됩니다.",
+        note: "사진은 '과제명_라벨번호_개체번호_형질_일자'로 기록되며, 기본은 원본 화질로 저장됩니다(설정에서 변경).",
         calls: [gc('cQuick', 1)] },
 
       { img: '13-map', chap: '필드맵', title: '필드 배치도 보기',
         body: '필드 배치를 그대로 봅니다. <b>큰 별 = 라벨 번호 선발</b>, <b>작은 별 = 개체 선발</b>이고 <b>선발만 보기</b>로 걸러 볼 수 있습니다. 칸을 누르면 그 라벨번호로 바로 이동합니다.',
         calls: [gc('cMapWrap', 1)] },
 
-      { img: '14-export', chap: '내보내기', title: '현재 선택 과제 CSV · 사진 내보내기',
-        body: '<b>①</b> CSV — 엑셀에서 바로 열리는 롱포맷(과제의 모든 세대 한 파일)<br><b>②</b> 사진 ZIP — <b>CropMemo / 과제명 /</b> 폴더 구조 그대로',
-        calls: [gc('eCsv', 1), gc('eZip', 2)] },
+      { img: '14-export', chap: '내보내기', title: '선택 과제 · 전체 과제 내보내기',
+        body: '<b>①</b> 지금 보고 있는 과제만 — 파일 한 묶음(CSV·사진) · CSV만 · 사진만 · 사진 골라서<br><b>②</b> 모든 과제 — 파일 한 묶음 · CSV만 · 사진만',
+        calls: [gc('eProjAll', 1), gc('eAllZip', 2)] },
 
-      { img: '15-settings', chap: '설정', title: '동기화 연결',
-        body: 'Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 구글 시트·드라이브로 자동 전송됩니다. 오프라인에서는 기기에 쌓였다가 연결되는 순간 한 번에 올라갑니다.',
-        calls: [gc('sUrl', 1), gc('sSyncOn', 2, 'right')] },
+      { img: '15-settings', chap: '설정', title: '동기화 연결 · 사진 화질',
+        body: '<b>①</b> Apps Script <b>URL</b>을 넣고 저장하면 온라인일 때 구글 시트·드라이브로 자동 전송됩니다. 오프라인에서는 기기에 쌓였다가 연결되는 순간 한 번에 올라갑니다.<br><b>②</b> <b>사진 화질</b> — 기본은 <b>원본</b>(재압축 없음)이고, 용량을 줄이려면 <b>저화질</b>을 고르세요.',
+        note: '설정 맨 아래 <사용 가이드 다시 보기>로 이 안내를 언제든 다시 볼 수 있습니다.',
+        calls: [gc('sUrl', 1), gc('sPhotoQ', 2)] },
 
       { img: '16-backup', chap: '기기 백업', title: '내 기기에 자료 백업 하기',
         body: '홈의 <b>기기 백업</b>을 누르면 백업 폴더 선택 후 백업이 진행 됩니다. 전체 과제의 모든 데이터, 사진 자료가 저장됩니다.',
