@@ -631,6 +631,12 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
   }
   function colLetter(n) { var s = ''; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - m - 1) / 26; } return s; }
+  // 엑셀 열 너비 계산용 — 한글·한자는 두 칸 폭으로 센다
+  function xlsxTextW(v) {
+    var t = String(v == null ? '' : v), n = 0;
+    for (var i = 0; i < t.length; i++) n += t.charCodeAt(i) > 0x1100 ? 2 : 1;
+    return n;
+  }
   function xlsxSheetName(s) { return (String(s == null ? '' : s).replace(/[\[\]\*\?\/\\:]/g, ' ').replace(/\s+/g, ' ').trim() || '야장').slice(0, 31); }
   // 값이 숫자면 숫자 칸으로, 아니면 문자 칸으로 넣는다
   function xcell(ref, v, st, asText) {
@@ -770,7 +776,7 @@
     p.items.forEach(function (it) {
       (it.g.traits || []).forEach(function (t) {
         idName[it.g.id + '|' + t.id] = t.name;
-        if (!tMap[t.name]) { tMap[t.name] = { name: t.name, unit: xlsxTraitUnit(t), dates: [] }; tOrder.push(tMap[t.name]); }
+        if (!tMap[t.name]) { tMap[t.name] = { name: t.name, unit: xlsxTraitUnit(t), type: t.type, dates: [] }; tOrder.push(tMap[t.name]); }
         else if (!tMap[t.name].unit) tMap[t.name].unit = xlsxTraitUnit(t);
       });
     });
@@ -795,7 +801,7 @@
     var cols = [];
     tOrder.forEach(function (t) {
       t.dates.forEach(function (d) {
-        cols.push({ name: t.name, date: d, head: t.name + (t.unit ? '(' + t.unit + (d ? ', ' + d : '') + ')' : (d ? '(' + d + ')' : '')) });
+        cols.push({ name: t.name, date: d, text: t.type === 'text', wide: 0, head: t.name + (t.unit ? '(' + t.unit + (d ? ', ' + d : '') + ')' : (d ? '(' + d + ')' : '')) });
       });
     });
     var nCol = 6 + cols.length;
@@ -826,7 +832,8 @@
             var c = cols[ci];
             var v = vmap[g.id + '|' + l.id + '|' + k + '|' + c.name + '|' + c.date];
             if (v === undefined && c.date) v = vmap[g.id + '|' + l.id + '|' + k + '|' + c.name + '|'];   // 조사일 없이 저장된 값
-            cells += xcell(colLetter(7 + ci) + r, v == null ? '' : v, 4);
+            if (c.text) { if (v != null && v !== '') c.wide = Math.max(c.wide, xlsxTextW(v)); cells += xcell(colLetter(7 + ci) + r, v == null ? '' : v, 5, true); }
+            else cells += xcell(colLetter(7 + ci) + r, v == null ? '' : v, 4);
           }
           out.push('<row r="' + r + '">' + cells + '</row>');
           r++;
@@ -836,10 +843,16 @@
     }
 
     // 열 너비 · 병합
+    var pedW = 12;
+    p.items.forEach(function (it) { it.g.lines.forEach(function (l) { if (l.pedigree) pedW = Math.max(pedW, xlsxTextW(l.pedigree)); }); });
     var cw = '<cols><col min="1" max="1" width="10.5" customWidth="1"/><col min="2" max="2" width="12" customWidth="1"/>' +
-      '<col min="3" max="3" width="22" customWidth="1"/><col min="4" max="4" width="7" customWidth="1"/>' +
+      '<col min="3" max="3" width="' + Math.min(40, Math.max(18, pedW + 2)) + '" customWidth="1"/><col min="4" max="4" width="7" customWidth="1"/>' +
       '<col min="5" max="5" width="6" customWidth="1"/><col min="6" max="6" width="6" customWidth="1"/>' +
-      (cols.length ? '<col min="7" max="' + nCol + '" width="13.5" customWidth="1"/>' : '') + '</cols>';
+      cols.map(function (c, ci) {
+        // 문자형(비고 등)은 적어 넣은 글이 잘리지 않게 칸 폭을 내용에 맞춘다
+        var w = c.text ? Math.min(60, Math.max(18, c.wide + 2)) : 13.5;
+        return '<col min="' + (7 + ci) + '" max="' + (7 + ci) + '" width="' + w + '" customWidth="1"/>';
+      }).join('') + '</cols>';
     var mergeEnd = colLetter(Math.min(10, nCol));
     var merges = '<mergeCells count="2"><mergeCell ref="B1:F1"/><mergeCell ref="B2:' + mergeEnd + '2"/></mergeCells>';
 
@@ -1337,7 +1350,9 @@
       $('wRcbd').onclick = function () { w.rcbd = !w.rcbd; renderNew(); };
       document.querySelectorAll('.wrep').forEach(function (b) { b.onclick = function () { w.reps = parseInt(b.getAttribute('data-n')); renderNew(); }; });
       if ($('wFileReset')) $('wFileReset').onclick = function () { w.rows = null; w.fileName = ''; renderNew(); };
-      if ($('wTpl')) $('wTpl').onclick = function () { var pf = w.prefix || yy(); var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' + pf + '-0001,금강/IT12345,F3,1,10\r\n' + pf + '-0002,새금강/IT12346,F3,2,10\r\n' + pf + '-0003,조경/IT12347,F3,3,10\r\n'; downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv'); toast('빈 양식 CSV 내려받음'); };
+      if ($('wTpl')) $('wTpl').onclick = function () { var pf = w.prefix || yy(); var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' +
+        pf + '-0001,금강/IT12345,F3,1,10\r\n' + pf + '-0001,금강/IT12345,F3,2,10\r\n' + pf + '-0001,금강/IT12345,F3,3,10\r\n' +
+        pf + '-0002,새금강/IT12346,F3,1,10\r\n' + pf + '-0002,새금강/IT12346,F3,2,10\r\n' + pf + '-0002,새금강/IT12346,F3,3,10\r\n';  downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv'); toast('빈 양식 CSV 내려받음'); };
       if ($('wPick')) $('wPick').onclick = function () { $('wFile').click(); };
       if ($('wShot')) $('wShot').onclick = function () { $('wCam').click(); };
       if ($('wCam')) $('wCam').onchange = function () {
@@ -3312,7 +3327,9 @@
     var g = S.gens[S.bulkIdx] || S.gens[0];
     var pf = (g && /^\d{2}$/.test(String(g.prefix || '')) ? g.prefix : yy());
     var gl = (g && g.label) || 'F3';
-    var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' + pf + '-0001,금강/IT12345,' + gl + ',1,10\r\n' + pf + '-0002,새금강/IT12346,' + gl + ',2,10\r\n' + pf + '-0003,조경/IT12347,' + gl + ',3,10\r\n';
+    var csv = '라벨번호,품종명/Pedigree,세대,반복,개체수\r\n' +
+      pf + '-0001,금강/IT12345,' + gl + ',1,10\r\n' + pf + '-0001,금강/IT12345,' + gl + ',2,10\r\n' + pf + '-0001,금강/IT12345,' + gl + ',3,10\r\n' +
+      pf + '-0002,새금강/IT12346,' + gl + ',1,10\r\n' + pf + '-0002,새금강/IT12346,' + gl + ',2,10\r\n' + pf + '-0002,새금강/IT12346,' + gl + ',3,10\r\n';
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), 'label_template.csv');
     toast('빈 양식 CSV 내려받음');
   }
@@ -4286,6 +4303,14 @@
         note: 'Chrome 브라우저 앱 설치시 정상 백업 지원 되며, 다른 브라우저 앱 설치의 경우 ZIP 파일 다운로드로 진행됩니다.',
         calls: [gc('bkCard', 1)] },
 
+      { img: '19-xlsx', doc: true, chap: '받는 파일', title: 'Excel 야장 (사용자 조사용)',
+        body: '한 줄이 <b>개체 하나</b>입니다. G열부터 <b>형질(단위, 조사일)</b> 순서로 가로로 펴져 있어 <b>그대로 인쇄해 조사</b>하거나 값을 채워 넣기 좋습니다.',
+        note: 'A1 과제 목표 / B1 과제명, A2 경종 개요 / B2 파종일·정식일, 5행 제목 행, 6행부터 값. 그림을 탭하면 크게 볼 수 있습니다.' },
+
+      { img: '20-csv', doc: true, chap: '받는 파일', title: 'CSV 야장 (통계 분석용)',
+        body: '한 줄이 <b>개체 하나의 형질 하나</b>인 <b>롱포맷</b>입니다. 엑셀 피벗이나 R·SPSS에 <b>그대로 넣어 분석</b>할 수 있습니다.',
+        note: 'UTF-8(BOM)이라 엑셀에서 한글이 깨지지 않습니다. 형질 수집형태 열이 있어 다시 불러올 때 형질 종류가 그대로 살아납니다.' },
+
       { last: true, chap: '', title: 'Crop Memo Pro!',
         body: '이제 첫 과제를 만들고, 동기화/백업을 수행 해보세요.<br>인터넷이 끊겨도 입력한 값은 기기에 남지만, 안전을 위해 데이터 백업 하시기 바랍니다.' }
     ];
@@ -4309,7 +4334,9 @@
     if (!o) { o = document.createElement('div'); o.id = 'guideOvl'; o.className = 'govl'; document.body.appendChild(o); }
     renderGuide();
   }
+  function closeGuideZoom() { var z = document.getElementById('gZoom'); if (z) z.remove(); }
   function closeGuide(markSeen) {
+    closeGuideZoom();
     var o = document.getElementById('guideOvl'); if (o) o.remove();
     S.guide = null;
     if (markSeen !== false) kvSet('guideSeen', true);
@@ -4325,9 +4352,10 @@
       ? '<div class="gend"><div class="gendic">' + ico('circle-check', '#fff', 40) + '</div>' +
         '<div class="gendttl">준비 완료</div>' +
         '<div class="gendmsg">언제든 <b>설정 → 사용 가이드 다시 보기</b>에서<br>이 안내를 다시 볼 수 있습니다.</div></div>'
-      : '<div class="gshot"><div class="gframe"><img src="guide/' + s.img + '.jpg" alt="">' +
+      : '<div class="gshot"><div class="gframe' + (s.doc ? ' gdoc' : '') + '" id="gShot"><img src="guide/' + s.img + '.jpg" alt="">' +
         (s.calls || []).map(guideCallHTML).join('') +
         (s.swipe ? '<div class="gswh">◀ 개체 ▶</div><div class="gswv">▲ 라벨번호 ▼</div>' : '') +
+        '<div class="gzhint">' + ico('search', '#fff', 12) + ' 탭하면 크게</div>' +
         '</div></div>';
     var dots = G.slides.map(function (x, k) { return '<div class="gdot' + (k === G.i ? ' on' : '') + '" data-k="' + k + '"></div>'; }).join('');
     var foot = s.last
@@ -4354,6 +4382,7 @@
     if ($('gDone')) $('gDone').onclick = function () { closeGuide(false); kvSet('guideSeen', !!G.hide); toast(G.hide ? '가이드를 닫았습니다 · 설정에서 다시 볼 수 있어요' : '다음 실행 때 다시 안내합니다'); };
     $('gClose').onclick = function () { closeGuide(true); };
     o.querySelectorAll('.gdot').forEach(function (d) { d.onclick = function () { G.i = +d.getAttribute('data-k'); renderGuide(); }; });
+    if ($('gShot')) $('gShot').onclick = function (e) { e.stopPropagation(); openGuideZoom('guide/' + s.img + '.jpg', s.title); };
     // 좌우 스와이프로 넘기기
     var sx = null, sy = null;
     o.onpointerdown = function (e) { sx = e.clientX; sy = e.clientY; };
@@ -4362,6 +4391,40 @@
       var dx = e.clientX - sx, dy = e.clientY - sy; sx = null;
       if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) guideGo(dx < 0 ? 1 : -1);
     };
+  }
+  // 가이드 그림 확대해서 보기 — 탭하면 커지고, ＋ / － 로 단계 조절
+  var GZ_STEPS = [100, 150, 220, 320, 460];
+  function openGuideZoom(src, title) {
+    if (document.getElementById('gZoom')) return;
+    var z = document.createElement('div');
+    z.id = 'gZoom'; z.className = 'gzoom';
+    z.innerHTML =
+      '<div class="gzbar">' +
+        '<span class="gztitle">' + esc(title || '') + '</span>' +
+        '<button class="gzbtn" id="gzOut">－</button>' +
+        '<span class="gzpct" id="gzPct">100%</span>' +
+        '<button class="gzbtn" id="gzIn">＋</button>' +
+        '<button class="gzbtn" id="gzClose">' + ico('x', '#fff', 17) + '</button>' +
+      '</div>' +
+      '<div class="gzbody" id="gzBody"><img id="gzImg" src="' + src + '" alt=""></div>';
+    document.body.appendChild(z);
+    var step = 0, img = $('gzImg'), body = $('gzBody');
+    function apply(keepCenter) {
+      var before = { x: body.scrollLeft + body.clientWidth / 2, y: body.scrollTop + body.clientHeight / 2, w: img.offsetWidth || 1, h: img.offsetHeight || 1 };
+      img.style.width = GZ_STEPS[step] + '%';
+      $('gzPct').textContent = GZ_STEPS[step] + '%';
+      if (keepCenter) requestAnimationFrame(function () {
+        var rx = before.x / before.w, ry = before.y / before.h;
+        body.scrollLeft = rx * img.offsetWidth - body.clientWidth / 2;
+        body.scrollTop = ry * img.offsetHeight - body.clientHeight / 2;
+      });
+    }
+    apply(false);
+    $('gzIn').onclick = function () { if (step < GZ_STEPS.length - 1) { step++; apply(true); } };
+    $('gzOut').onclick = function () { if (step > 0) { step--; apply(true); } };
+    img.onclick = function () { step = (step + 1) % GZ_STEPS.length; apply(true); };
+    $('gzClose').onclick = function () { z.remove(); };
+    z.addEventListener('click', function (e) { if (e.target === z || e.target === body) z.remove(); });
   }
   function guideGo(d) {
     var G = S.guide; if (!G) return;

@@ -197,3 +197,23 @@ a{color:var(--green-d)}
 .blocktitle{font-size:18px;font-weight:700;margin-bottom:8px}
 .blockmsg{font-size:13.5px;color:var(--text-secondary);line-height:1.75}
 .blockwho{font-size:11px;color:var(--text-muted);margin-top:12px}
+
+/* 가이드 그림 — 문서(엑셀·CSV) 예시는 잘라내지 않고 전체가 보이게 */
+.gframe.gdoc{aspect-ratio:auto;width:100%;height:auto;max-height:100%;box-shadow:none;background:transparent;display:block;overflow:visible;border-radius:8px}
+.gframe.gdoc img{width:100%;height:auto;max-height:100%;object-fit:contain;display:block;border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,.16);background:#fff}
+/* 탭하면 크게 — 안내 배지 */
+.gframe{cursor:zoom-in}
+.gzhint{position:absolute;right:7px;bottom:7px;display:inline-flex;align-items:center;gap:4px;background:rgba(15,20,16,.62);color:#fff;
+  font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:20px;pointer-events:none}
+/* 그림 확대해서 보기 */
+.gzoom{position:fixed;inset:0;z-index:400;background:#10140F;display:flex;flex-direction:column}
+.gzbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:9px 10px;background:rgba(0,0,0,.5);color:#fff}
+.gztitle{flex:1;min-width:0;font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.92}
+.gzpct{font-size:11.5px;font-weight:700;min-width:42px;text-align:center;opacity:.85}
+.gzbtn{width:34px;height:34px;border:0;border-radius:10px;background:rgba(255,255,255,.16);color:#fff;font-size:17px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+.gzbtn:active{background:rgba(255,255,255,.3)}
+.gzbody{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px;display:flex;align-items:flex-start;justify-content:center}
+.gzbody img{max-width:none;flex:0 0 auto;display:block;border-radius:6px;background:#fff;cursor:zoom-in}
+
+.gframe.gdoc .gzhint{top:7px;bottom:auto}
