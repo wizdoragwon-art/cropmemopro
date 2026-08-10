@@ -1,6 +1,6 @@
 // Crop Memo Pro — service worker (network-first shell, offline fallback)
 // app.js 의 APP_VERSION 과 같은 값으로 맞춰 두면, 업데이트할 때 예전 캐시가 자동으로 정리됩니다
-const CACHE = 'cropmemo-26.8.8';
+const CACHE = 'cropmemo-26.8.10';
 const SHELL = [
   './', './index.html', './app.js', './icons.js', './styles.css', './native-bridge.js',
   './manifest.webmanifest',
