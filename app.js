@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.8.8';
+  var APP_VERSION = '26.8.10';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -167,12 +167,10 @@
     return res;
   }
 
-  function inferSeries(t) {
-    if (t.type === 'date' || t.type === 'text' || t.type === 'categorical') return false;
-    if (/마커/.test(t.name)) return false;
-    if (/과장|과폭|과중|과경|근장|근경|근중|종경|횡경|결구중|결구고|당도/.test(t.name)) return false;
-    return true;
-  }
+  // 모든 형질은 조사일별로 따로 저장한다.
+  // (예전에는 과장·과중처럼 한 번만 재는 형질을 조사일과 무관한 값 하나로 두었는데,
+  //  새 조사일을 만들면 앞 조사일 값이 그대로 보이고 고치면 앞 값까지 바뀌어 혼란스러웠다)
+  function inferSeries(t) { return true; }
 
   function seedGens() {
     var traits = [
@@ -279,7 +277,8 @@
   function curLine() { return curGen().lines[S.lineIdx]; }
   function traitById(id) { var ts = curGen().traits; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   function total() { return curLine().indivTotal; }
-  function valKey(lineId, indiv, tid) { var t = traitById(tid), g = curGen(); return g.id + ':' + lineId + ':' + indiv + ':' + tid + (t && t.series ? ('@' + S.date) : ''); }
+  // 값은 언제나 조사일별로 따로 저장한다 (조사일을 새로 만들면 그 날짜 값은 비어 있는 상태로 시작)
+  function valKey(lineId, indiv, tid) { return curGen().id + ':' + lineId + ':' + indiv + ':' + tid + '@' + S.date; }
   function getVal(tid) { return S.vals[valKey(curLine().id, S.indiv, tid)]; }
   function lineHasIndivSel(lineId) { for (var k in S.indivSel) { if (S.indivSel[k] && k.indexOf(lineId + ':') === 0) return true; } return false; }
 
@@ -287,10 +286,35 @@
     var g = curGen(), l = curLine(), t = traitById(tid);
     var k = valKey(l.id, S.indiv, tid);
     S.vals[k] = value;
-    var rec = { k: k, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: tid, date: S.date, ser: !!(t && t.series), value: value, updatedAt: Date.now(), dirty: 1 };
+    var rec = { k: k, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: tid, date: S.date, ser: true, value: value, updatedAt: Date.now(), dirty: 1 };
     await obsPut(rec);
     S.lastSaved = Date.now();
     updatePending();
+  }
+
+  // 예전 버전은 과장·과중처럼 '한 번만 재는' 형질을 조사일과 무관한 값 하나로 저장했다.
+  // 그대로 두면 조사일을 새로 만들었을 때 앞 조사일 값이 그대로 보이고, 고치면 앞 값까지 바뀐다.
+  // 그래서 조사일이 빠진 옛 기록에 그 기록의 조사일을 붙여 조사일별 기록으로 옮긴다. (한 번만 실행)
+  async function migrateSeriesKeys(gens) {
+    if (await kvGet('serMig')) return;
+    var all = await obsAll();
+    var byGen = {}; (gens || []).forEach(function (g) { byGen[g.id] = g; });
+    var olds = all.filter(function (r) { return String(r.k || '').indexOf('@') < 0; });
+    if (olds.length) {
+      await new Promise(function (res) {
+        var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
+        olds.forEach(function (r) {
+          var g = byGen[r.genId];
+          var d = r.date || (g && g.surveyDates && g.surveyDates[g.surveyDates.length - 1]) || todayStr();
+          st.delete(r.k);
+          r.k = r.genId + ':' + r.lineId + ':' + r.indiv + ':' + r.traitId + '@' + d;
+          r.date = d; r.ser = true;
+          st.put(r);
+        });
+        tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
+      });
+    }
+    await kvSet('serMig', 1);
   }
 
   async function loadVals() {
@@ -459,7 +483,7 @@
       });
     });
     dirty.forEach(function (r) {
-      batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (recSeries(r) && r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
+      batch.push({ table: 'observation', key: r.genId + '|' + r.lineId + '|' + r.indiv + '|' + r.traitId + (r.date ? ('@' + r.date) : ''), data: { projId: r.genId, genId: r.genId, lineId: r.lineId, indiv: r.indiv, traitId: r.traitId, value: (typeof r.value === 'string' && r.value.indexOf('data:image') === 0) ? '(그림)' : r.value, date: r.date || '' }, updatedAt: r.updatedAt });
     });
     S.syncing = true; renderCurrent();
     try {
@@ -1278,7 +1302,7 @@
       var opts2 = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
       return '<div class="card" style="margin-bottom:8px;border:0.5px solid #CFE0BA;background:#F7FAF2">' +
         '<div style="display:flex;gap:8px;align-items:center"><input class="ein wT-name" data-i="' + i + '" style="flex:1;height:38px" placeholder="형질명" value="' + esc(t.name) + '"><button class="btn wT-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 15) + '</button></div>' +
-        '<div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein wT-type" data-i="' + i + '" style="flex:1;height:38px">' + opts2 + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw wT-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' +
+        '<div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein wT-type" data-i="' + i + '" style="flex:1;height:38px">' + opts2 + '</select></div>' +
         teConfig(t, i, 'wT') + '</div>';
     }).join('');
     return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + wizGenList(w).join('·') + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
@@ -1377,7 +1401,6 @@
       $('wTAdd').onclick = function () { keepScroll(); syncWT(); w.extraTraits = w.extraTraits || []; var nt = { name: '새 형질', type: 'numeric', unit: '' }; nt.series = inferSeries(nt); w.extraTraits.push(nt); renderNew(); };
       document.querySelectorAll('.wT-name').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value; }; });
       document.querySelectorAll('.wT-type').forEach(function (sel) { sel.onchange = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderNew(); }; });
-      document.querySelectorAll('.wT-series').forEach(function (sw) { sw.onclick = function () { keepScroll(); syncWT(); var t = w.extraTraits[+sw.getAttribute('data-i')]; t.series = !t.series; renderNew(); }; });
       document.querySelectorAll('.wT-del').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits.splice(+b.getAttribute('data-i'), 1); renderNew(); }; });
       document.querySelectorAll('.wT-uchip').forEach(function (b) { b.onclick = function () { keepScroll(); syncWT(); w.extraTraits[+b.getAttribute('data-i')].unit = b.getAttribute('data-u'); renderNew(); }; });
       document.querySelectorAll('.wT-unit').forEach(function (inp) { inp.oninput = function () { var t = w.extraTraits[+inp.getAttribute('data-i')]; if (t) t.unit = inp.value.trim(); }; });
@@ -1590,7 +1613,7 @@
     var v = $('view-genedit');
     var traitTags = g.traits.map(function (t) {
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : t.type === 'text' ? '문자' : ''));
-      return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:var(--surface-1);border:0.5px solid var(--border);border-radius:14px;padding:4px 10px;margin:0 6px 6px 0">' + esc(t.name) + (tag ? '<span style="font-size:10px;color:var(--text-muted)">' + esc(tag) + '</span>' : '') + (t.series ? ico('clock', '#3B6D11', 11) : '') + '</span>';
+      return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:var(--surface-1);border:0.5px solid var(--border);border-radius:14px;padding:4px 10px;margin:0 6px 6px 0">' + esc(t.name) + (tag ? '<span style="font-size:10px;color:var(--text-muted)">' + esc(tag) + '</span>' : '') + '' + '</span>';
     }).join('');
     var rows = g.lines.map(function (l, li) {
       return '<tr style="border-top:0.5px solid var(--border)">' +
@@ -2077,7 +2100,7 @@
       html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', '#3B6D11', 11) : '') + '</button>';
     });
     html += '<button class="btn" id="cNewDate" style="padding:5px 10px;font-size:12px;border-radius:16px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 13) + ' 새 조사</button></div>' +
-      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">조사일 탭 → 수정·삭제 · ' + ico('clock', '#3B6D11', 10) + ' 시계열은 조사일별 저장</div>';
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">조사일 탭 → 수정·삭제 · ' + ico('clock', '#3B6D11', 10) + ' 값은 조사일마다 따로 저장됩니다</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
     $('cNewDate').onclick = function () { newDatePopup(); };
@@ -2165,7 +2188,7 @@
     var g = curGen();
     openOverlay(
       '<div class="ovl-title">새 조사 시작</div>' +
-      '<div class="ovl-msg">조사일을 입력하세요. 시계열 형질은 이 날짜로 저장됩니다.</div>' +
+      '<div class="ovl-msg">조사일을 입력하세요. 앞선 조사일의 값은 그대로 남고, 새 조사일은 빈 칸에서 시작합니다.</div>' +
       '<input class="ein" id="dmInput" style="margin-top:12px;text-align:center;font-size:16px;font-weight:600" value="' + esc(todayStr()) + '">' +
       '<div class="ovl-btns"><button class="btn" id="dmBack">취소</button><button class="btn primary" id="dmSave">시작</button></div>'
     );
@@ -2197,7 +2220,7 @@
       var has = getValFor(t.id) != null && getValFor(t.id) !== '';
       var b = document.createElement('button');
       b.className = 'pill' + (t.id === S.trait ? ' on' : '');
-      b.innerHTML = (has ? '<i class="ti ti-check" style="font-size:13px"></i>' : '') + esc(t.name) + (t.series ? ' <i class="ti ti-clock" style="font-size:11px;color:#3B6D11"></i>' : '');
+      b.innerHTML = (has ? '<i class="ti ti-check" style="font-size:13px"></i>' : '') + esc(t.name);
       b.onclick = function () { S.trait = t.id; renderPills(); renderInput(); renderHist(); };
       p.appendChild(b);
     });
@@ -2210,7 +2233,7 @@
     var v = getValFor(t.id);
     var head = document.createElement('div'); head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px';
     var hu = headUnit(t);
-    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (hu ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + hu + ')</span>' : '') + (t.series ? ' <span style="font-size:11px;color:#3B6D11">· ' + S.date + '</span>' : '') + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
+    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (hu ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + hu + ')</span>' : '') + ' <span style="font-size:11px;color:#3B6D11">· ' + S.date + '</span>' + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
     area.appendChild(head);
 
     if (t.type === 'numeric' || t.type === 'counter' || t.type === 'ratio') {
@@ -2285,7 +2308,7 @@
   function renderHist() {
     var h = $('cHist'); if (!h) return; h.innerHTML = '';
     var t = traitById(S.trait), g = curGen(), l = curLine();
-    if (!t || !t.series) return;
+    if (!t) return;
     var parts = g.surveyDates.map(function (d) { var vv = S.vals[g.id + ':' + l.id + ':' + S.indiv + ':' + t.id + '@' + d]; return '<span style="' + (d === S.date ? 'color:#27500A;font-weight:600' : 'color:var(--text-secondary)') + '">' + d + ' ' + ((vv == null || vv === '') ? '—' : esc(vv)) + '</span>'; });
     h.innerHTML = '<div class="card" style="font-size:11px;color:var(--text-secondary)">' + ico('history', '#3B6D11', 12) + ' 이 개체 ' + esc(t.name) + ' 추이 · ' + parts.join(' → ') + '</div>';
   }
@@ -2344,7 +2367,7 @@
         '<input class="ein tE-name" data-i="' + i + '" style="flex:1;min-width:0;height:40px" value="' + esc(t.name) + '">' +
         '<button class="btn tE-up" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === 0 ? ';opacity:.35' : '') + '">▲</button>' +
         '<button class="btn tE-down" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === g.traits.length - 1 ? ';opacity:.35' : '') + '">▼</button>' +
-        '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select><div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;color:var(--text-secondary)">시계열</span><div class="sw tE-series' + (t.series ? ' on' : '') + '" data-i="' + i + '"><div class="knob"></div></div></div></div>' + teConfig(t, i) + '</div>';
+        '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select></div>' + teConfig(t, i) + '</div>';
     }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
@@ -2357,7 +2380,6 @@
     $('tEBack').onclick = done; $('tEDone').onclick = done;
     v.querySelectorAll('.tE-name').forEach(function (inp) { inp.onchange = function () { var t = g.traits[+inp.getAttribute('data-i')]; t.name = inp.value.trim() || t.name; }; });
     v.querySelectorAll('.tE-type').forEach(function (sel) { sel.onchange = function () { syncTE(); var t = g.traits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderTraitEditor(); }; });
-    v.querySelectorAll('.tE-series').forEach(function (sw) { sw.onclick = function () { syncTE(); var t = g.traits[+sw.getAttribute('data-i')]; t.series = !t.series; renderTraitEditor(); }; });
     v.querySelectorAll('.tE-del').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (g.traits.length <= 1) { toast('형질은 최소 1개 필요합니다'); return; } askConfirm('"' + g.traits[i].name + '" 형질을 삭제할까요?', { title: '형질 삭제', danger: true, ok: '삭제' }).then(function (ok) { if (!ok) return; syncTE(); var tid = g.traits[i].id; g.traits.splice(i, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.traitId === tid) st.delete(r.k); }); }); renderTraitEditor(); }); }; });
     v.querySelectorAll('.tE-unit').forEach(function (inp) { inp.oninput = function () { g.traits[+inp.getAttribute('data-i')].unit = inp.value.trim(); }; });
     v.querySelectorAll('.tE-uchip').forEach(function (b) { b.onclick = function () { syncTE(); g.traits[+b.getAttribute('data-i')].unit = b.getAttribute('data-u'); renderTraitEditor(); }; });
@@ -2504,7 +2526,7 @@
     if (S.showSelOnly && lsh === 0) gl2.innerHTML = '<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);text-align:center;padding:6px 0">선발된 항목이 없습니다</div>';
     $('mLfoot').textContent = S.showSelOnly ? ('계통선발 ' + lselN + ' · 개체선발 있는 계통 ' + lselI) : ('총 ' + g.lines.length + ' 계통 · 선발 ' + lselN);
   }
-  function indivEntered(lineId, iv) { var g = curGen(); for (var i = 0; i < g.traits.length; i++) { var t = g.traits[i]; var k = g.id + ':' + lineId + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : ''); if (S.vals[k] != null && S.vals[k] !== '') return true; } return false; }
+  function indivEntered(lineId, iv) { var g = curGen(); for (var i = 0; i < g.traits.length; i++) { var t = g.traits[i]; var k = g.id + ':' + lineId + ':' + iv + ':' + t.id + ('@' + S.date); if (S.vals[k] != null && S.vals[k] !== '') return true; } return false; }
 
   // ---------- PUBLICATION CHARTS (ggpubr style) ----------
   var CW = 720, CH = 470, CM = { l: 84, r: 26, t: 54, b: 78 };
@@ -2689,7 +2711,7 @@
       if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
-        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + ('@' + dt);
         var v = parseFloat(S.vals[k]); if (!isNaN(v)) out.push(v);
       }
     });
@@ -2701,8 +2723,8 @@
       if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
-        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + dt) : '');
-        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + (ty.series ? ('@' + dt) : '');
+        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + ('@' + dt);
+        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + ('@' + dt);
         var xv = parseFloat(S.vals[kx]), yv = parseFloat(S.vals[ky]);
         if (!isNaN(xv) && !isNaN(yv)) pts.push({ x: xv, y: yv });
       }
@@ -2715,7 +2737,7 @@
       if (!lineIncluded(l) || !lineInFacet(l, mode, lv.key)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
         var dt = mode === 'date' ? lv.key : S.date;
-        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + dt) : '');
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + ('@' + dt);
         var v = parseFloat(S.vals[k]); if (isNaN(v)) continue;
         var key = gmode === 'rep' ? ('반복 ' + (l.rep || 1)) : (gmode === 'sel' ? (l.selected ? '선발' : '비선발') : l.label);
         if (!map[key]) { map[key] = []; order.push(key); }
@@ -2768,8 +2790,8 @@
     g.lines.forEach(function (l) {
       if (!lineIncluded(l)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
-        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + (tx.series ? ('@' + S.date) : '');
-        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + (ty.series ? ('@' + S.date) : '');
+        var kx = g.id + ':' + l.id + ':' + iv + ':' + tx.id + ('@' + S.date);
+        var ky = g.id + ':' + l.id + ':' + iv + ':' + ty.id + ('@' + S.date);
         var xv = parseFloat(S.vals[kx]), yv = parseFloat(S.vals[ky]);
         if (!isNaN(xv) && !isNaN(yv)) pts.push({ x: xv, y: yv });
       }
@@ -2781,7 +2803,7 @@
     g.lines.forEach(function (l) {
       if (!lineIncluded(l)) return;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
-        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : '');
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + ('@' + S.date);
         var v = parseFloat(S.vals[k]); if (isNaN(v)) continue;
         var key = mode === 'rep' ? ('반복 ' + (l.rep || 1)) : (mode === 'sel' ? (l.selected ? '선발' : '비선발') : l.label);
         if (!map[key]) { map[key] = []; order.push(key); }
@@ -2793,7 +2815,7 @@
   function currentChartSVG() {
     var g = curGen(), t = traitById(S.anTrait), c = S.chart;
     if (c.facet && c.facet !== 'none') { var fs2 = buildFacetSVG(); if (fs2) return fs2; }
-    var title = g.projName + ' · ' + g.label + (t.series ? ' (' + S.date + ')' : '');
+    var title = g.projName + ' · ' + g.label + ' (' + S.date + ')';
     if (c.type === 'hist') {
       var vals = [];
       anGather(t).forEach(function (o) { o.vals.forEach(function (v) { var n = parseFloat(v); if (!isNaN(n)) vals.push(n); }); });
@@ -2839,7 +2861,7 @@
     }
     setHtml += '</div>';
     var facetOpts = [['none', '없음'], ['rep', '반복별'], ['sel', '선발 여부']];
-    if (t.series && (g.surveyDates || []).length > 1) facetOpts.push(['date', '조사일별']);
+    if ((g.surveyDates || []).length > 1) facetOpts.push(['date', '조사일별']);
     var facetHtml = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-secondary)">격자 분할</span>' +
       facetOpts.map(function (m) { return '<button class="btn chFac" data-f="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.facet || 'none') === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
     body.innerHTML =
@@ -2924,7 +2946,7 @@
     g.lines.forEach(function (l) {
       var n = 0;
       for (var iv = 1; iv <= l.indivTotal; iv++) {
-        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : '');
+        var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + ('@' + S.date);
         var v = S.vals[k]; if (v != null && v !== '') n++;
       }
       if (n) out.push({ line: l, n: n });
@@ -2932,7 +2954,7 @@
     if (!out.length) {
       g.lines.forEach(function (l) {
         var any = 0;
-        g.traits.forEach(function (tt) { for (var iv = 1; iv <= l.indivTotal; iv++) { var k2 = g.id + ':' + l.id + ':' + iv + ':' + tt.id + (tt.series ? ('@' + S.date) : ''); if (S.vals[k2] != null && S.vals[k2] !== '') any++; } });
+        g.traits.forEach(function (tt) { for (var iv = 1; iv <= l.indivTotal; iv++) { var k2 = g.id + ':' + l.id + ':' + iv + ':' + tt.id + ('@' + S.date); if (S.vals[k2] != null && S.vals[k2] !== '') any++; } });
         if (any) out.push({ line: l, n: any });
       });
     }
@@ -3025,14 +3047,14 @@
     var g = curGen(), p = $('anPills'); p.innerHTML = '';
     g.traits.forEach(function (t) {
       var b = document.createElement('button'); b.className = 'pill' + (t.id === S.anTrait ? ' on' : '');
-      b.innerHTML = esc(t.name) + (isMeasure(t) ? ' <i class="ti ti-chart-bar" style="font-size:11px;color:#3B6D11"></i>' : '') + (t.series ? ' <i class="ti ti-clock" style="font-size:11px;color:#3B6D11"></i>' : '');
+      b.innerHTML = esc(t.name) + (isMeasure(t) ? ' <i class="ti ti-chart-bar" style="font-size:11px;color:#3B6D11"></i>' : '');
       b.onclick = function () { S.anTrait = t.id; renderAnPills(); renderAnDate(); renderAnBody(); };
       p.appendChild(b);
     });
   }
   function renderAnDate() {
     var g = curGen(), t = traitById(S.anTrait), bar = $('anDate'); bar.innerHTML = '';
-    if (!t.series) return;
+    if (!t) return;
     var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
     g.surveyDates.forEach(function (d) { html += '<button class="btn anD" data-d="' + d + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (d === S.date ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + d + '</button>'; });
     html += '</div>'; bar.innerHTML = html;
@@ -3040,7 +3062,7 @@
   }
   function anGather(t) {
     var g = curGen(), out = [];
-    g.lines.forEach(function (l) { if (!lineIncluded(l)) return; var vals = []; for (var iv = 1; iv <= l.indivTotal; iv++) { var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + (t.series ? ('@' + S.date) : ''); var raw = S.vals[k]; if (raw != null && raw !== '') vals.push(raw); } if (vals.length) out.push({ line: l, vals: vals }); });
+    g.lines.forEach(function (l) { if (!lineIncluded(l)) return; var vals = []; for (var iv = 1; iv <= l.indivTotal; iv++) { var k = g.id + ':' + l.id + ':' + iv + ':' + t.id + ('@' + S.date); var raw = S.vals[k]; if (raw != null && raw !== '') vals.push(raw); } if (vals.length) out.push({ line: l, vals: vals }); });
     return out;
   }
   function renderAnBody() {
@@ -3048,7 +3070,7 @@
     var byLine = anGather(t);
     var total = byLine.reduce(function (a, b) { return a + b.vals.length; }, 0);
     if (S.anTab === 'chart') { renderChartPanel(body, t, byLine); return; }
-    if (total === 0) { body.innerHTML = '<div style="padding:30px 10px;text-align:center;color:var(--text-muted)">이 형질의 입력값이 없습니다' + (t.series ? ' (' + S.date + ' 조사)' : '') + '<br><span style="font-size:12px">조사 탭에서 값을 입력하면 여기에 통계가 나타납니다.</span></div>'; return; }
+    if (total === 0) { body.innerHTML = '<div style="padding:30px 10px;text-align:center;color:var(--text-muted)">이 형질의 입력값이 없습니다' + ' (' + S.date + ' 조사)' + '<br><span style="font-size:12px">조사 탭에서 값을 입력하면 여기에 통계가 나타납니다.</span></div>'; return; }
     if (isMeasure(t)) renderMeasure(body, t, byLine); else renderCategory(body, t, byLine);
   }
   function stcell(l, val) { return '<div style="flex:1;min-width:66px;background:var(--surface-1);border-radius:9px;padding:8px 9px"><div style="font-size:15px;font-weight:600">' + val + '</div><div style="font-size:10px;color:var(--text-muted)">' + l + '</div></div>'; }
@@ -4214,10 +4236,10 @@
     anTabs:   { x: 3.4,  y: 8.3,  w: 93.2, h: 4.3 },
     anScope:  { x: 16.9, y: 13.7, w: 79.7, h: 3.8 },
     anPills:  { x: 1.5,  y: 17.7, w: 97,   h: 5.3 },
-    chType:   { x: 3.4,  y: 24.3, w: 93.2, h: 4.5 },
-    chFac:    { x: 16.6, y: 29.7, w: 48,   h: 3.3 },
-    chWrap:   { x: 3.4,  y: 34.3, w: 93.2, h: 38.7 },
-    chSave:   { x: 3.4,  y: 74.2, w: 93.2, h: 5.2 },
+    chType:   { x: 3.4,  y: 27.0, w: 93.2, h: 4.5 },
+    chFac:    { x: 16.6, y: 32.4, w: 67.2, h: 3.3 },
+    chWrap:   { x: 3.4,  y: 37.0, w: 93.2, h: 38.7 },
+    chSave:   { x: 3.4,  y: 76.8, w: 93.2, h: 5.2 },
     eProjAll: { x: 3.9,  y: 12.1, w: 92.2, h: 5.8 },
     eXlsx:    { x: 3.9,  y: 25.8, w: 92.2, h: 5.8 },
     eAllZip:  { x: 3.9,  y: 50.8, w: 92.2, h: 5.8 },
@@ -4263,7 +4285,8 @@
         calls: [gc('cCard', 1), gc('cPills', 2), gc('cMap', 3, 'right')] },
 
       { img: '11-traitedit', chap: '야장 수집', title: '형질 수정 · 추가',
-        body: '형질세트 편집에서 <b>이름 · 유형 · 단위</b>를 바꾸고 순서 이동·삭제·추가를 합니다. <b>시계열</b>을 켜면 조사일마다 값이 따로 쌓입니다.' },
+        body: '형질세트 편집에서 <b>이름 · 유형 · 단위</b>를 바꾸고 순서 이동·삭제·추가를 합니다.',
+        note: '모든 형질은 조사일마다 값이 따로 쌓입니다. 조사일을 새로 만들면 그 날짜는 빈 칸에서 시작하고, 앞선 조사일의 값은 그대로 남습니다.' },
 
       { img: '09-collect', chap: '야장 수집', title: '값 입력과 화면 넘기기',
         body: '값은 <b>입력하는 즉시 기기에 저장</b>됩니다.<br>화면을 <b>좌우로 밀면 개체</b>, <b>위아래로 밀면 라벨번호</b>가 넘어갑니다.',
@@ -4685,10 +4708,10 @@
           t.options = opts.length ? opts : ['항목1', '항목2', '항목3'];
         }
         normalizeUnit(t);
-        if (Object.keys(traitDates[tn]).length > 1) t.series = true;
+        t.series = true;                     // 모든 형질은 조사일별로 저장한다
         return t;
       });
-      if (!traits.length) traits = [{ id: 't1', name: '초장', type: 'numeric', unit: 'cm' }];
+      if (!traits.length) traits = [{ id: 't1', name: '초장', type: 'numeric', unit: 'cm', series: true }];
       var traitIdByName = {}; traits.forEach(function (t) { traitIdByName[t.name] = t.id; });
 
       // 2) 라벨 — 라벨목록 CSV 우선, 없으면 야장에서 뽑는다
@@ -4745,8 +4768,8 @@
         var iv = +pick(r, '개체') || 1, d = pick(r, '조사일') || dlist[dlist.length - 1];
         var raw = pick(r, '값'); if (raw === '' || raw === '(그림)') return;
         var val = (t && (t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter') && /^-?\d+(\.\d+)?$/.test(raw)) ? +raw : raw;
-        var key = ref.gid + ':' + ref.id + ':' + iv + ':' + tid + (t && t.series ? ('@' + d) : '');
-        st.put({ k: key, genId: ref.gid, lineId: ref.id, indiv: iv, traitId: tid, value: val, date: d, ser: !!(t && t.series), updatedAt: Date.now(), synced: 0, dirty: 1 });
+        var key = ref.gid + ':' + ref.id + ':' + iv + ':' + tid + '@' + d;
+        st.put({ k: key, genId: ref.gid, lineId: ref.id, indiv: iv, traitId: tid, value: val, date: d, ser: true, updatedAt: Date.now(), synced: 0, dirty: 1 });
         madeObs++;
         if (pick(r, '개체 선발') === 'Y') S.indivSel[ref.id + ':' + iv] = true;
       });
@@ -5069,8 +5092,10 @@
           if (normalizeUnit(t)) mig = true;
         });
       });
+      gens.forEach(function (g) { (g.traits || []).forEach(function (t) { if (!t.series) { t.series = true; mig = true; } }); });
       S.gens = gens;
       if (mig) await kvSet('gens', gens);
+      await migrateSeriesKeys(gens);
       S.settings = await kvGet('settings') || { syncUrl: '', token: '', deviceId: 'dev-' + Math.random().toString(36).slice(2, 8), haptic: true };
       // 사진 화질 단계 이름이 한 칸씩 올라가서, 예전에 골라 둔 값을 같은 화질로 옮긴다
       if (S.settings.photoQv !== 3) {
