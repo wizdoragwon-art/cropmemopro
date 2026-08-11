@@ -4016,6 +4016,8 @@
   }
 
   function renderSettings() {
+    // 담아 둔 의견이 있으면 설정 화면을 열 때 조용히 다시 보낸다
+    if (S.fbPending) flushFeedback(true).then(function (n) { if (n && S.view === 'settings') renderSettings(); });
     var v = $('view-settings'), st = S.settings, prov = st.provider || 'gas';
     function sect(icon, title, sub) {
       return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><div style="width:26px;height:26px;border-radius:8px;background:var(--green-t);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico(icon, '#3B6D11', 15) + '</div>' +
@@ -4142,6 +4144,15 @@
           (S.user && S.user.email ? '<button class="btn" id="sUserChk" style="flex:0 0 96px;height:44px;font-size:13px;background:var(--surface-2)">상태 확인</button>' : '') +
         '</div>'
       ) +
+      card(
+        '<div style="font-size:13px;font-weight:600">의견 보내기</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;line-height:1.6">고쳤으면 하는 점·불편한 점을 적어 보내주세요. 등록한 이메일과 함께 관리자에게 전달됩니다.</div>' +
+        '<textarea class="ein" id="sFbTxt" style="height:88px;padding:9px 12px;resize:none;margin-top:9px;line-height:1.6" placeholder="예) 조사 화면에서 개체 번호를 바로 골라 이동하고 싶습니다."></textarea>' +
+        '<div style="display:flex;gap:8px;margin-top:9px;align-items:center">' +
+          '<span id="sFbMsg" style="flex:1;min-width:0;font-size:11px;color:var(--text-muted);line-height:1.5">' + fbHint() + '</span>' +
+          '<button class="btn primary" id="sFbSend" style="flex:0 0 96px;height:44px;font-size:13.5px">보내기</button>' +
+        '</div>'
+      ) +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.7;text-align:center">Crop Memo Pro · 버전정보 ' + APP_VERSION + '<br>현장에서 인터넷 없이 저장되고, 연결되면 시트·드라이브로 동기화됩니다.</div>' +
       '</div>';
 
@@ -4183,6 +4194,18 @@
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     if ($('sGuide')) $('sGuide').onclick = function () { openGuide(); };
     if ($('sUser')) $('sUser').onclick = function () { go('signup'); };
+    if ($('sFbSend')) $('sFbSend').onclick = async function () {
+      var box = $('sFbTxt'), msg = $('sFbMsg'), txt = (box.value || '').trim();
+      if (!txt) { msg.style.color = '#B0721A'; msg.textContent = '보낼 내용을 적어 주세요.'; box.focus(); return; }
+      if (!(S.user && S.user.email)) { toast('먼저 사용자 등록을 해주세요'); go('signup'); return; }
+      this.disabled = true; msg.style.color = 'var(--text-muted)'; msg.textContent = '보내는 중…';
+      var r = await sendFeedback(txt);
+      this.disabled = false;
+      box.value = '';
+      msg.style.color = r.ok ? '#3B6D11' : '#B0721A';
+      msg.textContent = r.ok ? '보냈습니다. 고맙습니다!' : '지금은 보내지 못해 저장해 두었습니다 · 연결되면 자동으로 보냅니다';
+      toast(r.ok ? '의견을 보냈습니다' : '연결되면 자동으로 보냅니다');
+    };
     if ($('sUserChk')) $('sUserChk').onclick = function () {
       toast('상태 확인 중…');
       guardUser().then(function (st) { renderSettings(); if (st !== 'BLOCKED') toast('승인됨 (ACTIVE)'); });
@@ -5008,6 +5031,55 @@
     return u.status || 'ACTIVE';
   }
 
+  /* ----- 의견 보내기 -----
+   *   보낸 글은 구글 시트 Users 탭의 그 사용자 줄에서 '메모'(H열) 오른쪽 칸에 차례로 쌓인다.
+   *   오프라인이거나 전송에 실패하면 기기에 담아 두었다가 연결되면 자동으로 다시 보낸다.
+   */
+  async function fbQueue() { return (await kvGet('fbQ')) || []; }
+  function fbHint() {
+    var n = S.fbPending || 0;
+    if (n) return '보내지 못한 의견 ' + n + '건 · 연결되면 자동으로 보냅니다';
+    return S.fbSentAt ? ('마지막으로 보낸 때 ' + bkWhen(S.fbSentAt)) : '';
+  }
+  async function fbPost(item) {
+    var j = await postUser({ action: 'feedback', email: item.email, name: item.name || '', text: item.text,
+                             deviceId: S.settings.deviceId, app: APP_VERSION, at: item.at });
+    return !!(j && j.ok);
+  }
+  // 담아 둔 의견을 순서대로 다시 보낸다
+  async function flushFeedback(silent) {
+    if (S.fbBusy) return 0;
+    S.fbBusy = true;                       // 두 번 겹쳐 보내지 않도록 곧바로 잠근다
+    var sent = 0;
+    try {
+      var q = await fbQueue();
+      S.fbPending = q.length;
+      if (!q.length || !navigator.onLine || !userApi()) return 0;
+      while (q.length) {
+        var ok = false;
+        try { ok = await fbPost(q[0]); } catch (e) { ok = false; }
+        if (!ok) break;
+        q.shift(); sent++;
+        await kvSet('fbQ', q);
+      }
+      S.fbPending = q.length;
+      if (sent) { S.fbSentAt = Date.now(); await kvSet('fbSentAt', S.fbSentAt); if (!silent) toast('담아 둔 의견 ' + sent + '건을 보냈습니다'); }
+    } finally { S.fbBusy = false; }
+    return sent;
+  }
+  // 한 건 보내기 — 실패하면 기기에 담아 둔다
+  async function sendFeedback(text) {
+    var item = { text: text, email: (S.user && S.user.email) || '', name: (S.user && S.user.name) || '', at: Date.now() };
+    var q = await fbQueue();
+    if (navigator.onLine && userApi() && !q.length && !S.fbBusy) {
+      var ok = false;
+      try { ok = await fbPost(item); } catch (e) { ok = false; }
+      if (ok) { S.fbSentAt = item.at; S.fbPending = 0; await kvSet('fbSentAt', S.fbSentAt); return { ok: true }; }
+    }
+    q.push(item); await kvSet('fbQ', q); S.fbPending = q.length;
+    return { ok: false, queued: true };
+  }
+
   // 앱을 열 때 / 다시 온라인이 될 때 상태를 확인한다
   async function guardUser() {
     var st = await checkUserStatus();
@@ -5017,7 +5089,7 @@
   }
 
   // ---------- net ----------
-  function onNet() { if (navigator.onLine && S.user && S.user.email) guardUser(); if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
+  function onNet() { if (navigator.onLine && S.user && S.user.email) { guardUser(); flushFeedback(true).then(function (n) { if (n && S.view === 'settings') renderSettings(); }); } if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
 
   // ---------- boot ----------
   // ---------- Android 뒤로가기 ----------
@@ -5118,6 +5190,8 @@
       window.addEventListener('online', onNet); window.addEventListener('offline', onNet);
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
       S.user = await kvGet('user') || null;
+      S.fbSentAt = await kvGet('fbSentAt') || null;
+      S.fbPending = ((await kvGet('fbQ')) || []).length;
       go('home');
       setupBack();
       // 첫 실행이면 사용 가이드를 띄우고, 가이드가 끝나면 사용자 등록 화면으로 넘어간다
