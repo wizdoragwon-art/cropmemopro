@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.8.10';
+  var APP_VERSION = '26.9.16';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -73,7 +73,7 @@
   function photoFileName(g, p) {
     var lab = '알수없음'; (g.lines || []).forEach(function (l) { if (l.id === p.lineId) lab = l.label; });
     var tn = p.traitName || '사진';
-    return safeName(g.projName) + '_' + safeName(lab) + '_' + (p.indiv || 1) + '_' + safeName(tn) + '_' + ymd(p.createdAt) + '.jpg';
+    return safeName(saveNameOf(g.projName)) + '_' + safeName(lab) + '_' + (p.indiv || 1) + '_' + safeName(tn) + '_' + ymd(p.createdAt) + '.jpg';
   }
   function dataURLtoBytes(u) { var i = u.indexOf(','), b = atob(u.slice(i + 1)), a = new Uint8Array(b.length); for (var j = 0; j < b.length; j++) a[j] = b.charCodeAt(j); return a; }
   function downloadBlob(blob, filename) {
@@ -271,7 +271,23 @@
   //   모음에 묶인 과제:  CropMemo / 모음폴더명 / 과제명 /
   //   묶이지 않은 과제:  CropMemo / 과제명 /
   function projGroupName(p) { var f = folderOf(p && p.id); return f ? safeName(f.name) : ''; }
-  function projDirPath(p) { var gn = projGroupName(p); return (gn ? gn + '/' : '') + safeName(p ? p.name : ''); }
+  // 과제명 끝의 '(불러옴)' · '(불러옴 2)' 를 떼어낸다
+  function stripImported(n) { return String(n == null ? '' : n).replace(/\s*\(불러옴(\s+\d+)?\)\s*$/, '').trim(); }
+  // 백업·내보내기·동기화 파일에 쓰는 과제 이름.
+  //   화면에는 '(불러옴)' 을 남겨 두되, 저장되는 폴더·파일 이름에는 넣지 않는다.
+  //   떼어낸 이름이 다른 과제와 겹치면 뒤에 번호를 붙여 서로 덮어쓰지 않게 한다.
+  function saveNameOf(projName) {
+    var base = stripImported(projName);
+    if (!base || base === projName) return projName;
+    var seen = 0, mine = 0;
+    projects().forEach(function (x) {
+      if (stripImported(x.name) !== base) return;
+      seen++; if (x.name === projName) mine = seen;
+    });
+    return (seen > 1 && mine > 1) ? base + ' (' + mine + ')' : base;
+  }
+  function projSaveName(p) { return saveNameOf(p ? p.name : ''); }
+  function projDirPath(p) { var gn = projGroupName(p); return (gn ? gn + '/' : '') + safeName(projSaveName(p)); }
   function curProjKey() { return projKeyOf(curGen()); }
   function genRole(label) { return label === 'F1' ? '조합' : (label === 'F#' ? '범용' : '계통'); }
   function curLine() { return curGen().lines[S.lineIdx]; }
@@ -325,6 +341,9 @@
   async function updatePending() {
     var all = await obsAll();
     S.pending = all.filter(function (r) { return r.dirty; }).length;
+    var lb = S.lastBackup || 0;                              // 마지막 백업 이후 저장한 건수
+    S.bkPending = all.filter(function (r) { return (r.updatedAt || 0) > lb; }).length;
+    refreshProjDates(all);                                   // 과제별 마지막 조사일
     var b = document.querySelector('[data-pending]'); if (b) b.textContent = S.pending;
     var sc = $('syncStat'); if (sc) renderSyncStat(sc);
   }
@@ -392,6 +411,7 @@
     try { var r = await fetch('https://graph.microsoft.com/v1.0/me', { headers: { Authorization: 'Bearer ' + token } }); var j = await r.json(); return j.userPrincipalName || j.mail || j.displayName || ''; } catch (e) { return ''; }
   }
   async function syncOneDrive(proj, silent) {
+    await syncProjDates();
     var token = await odEnsureToken(silent);
     if (!token) return { ok: false };
     var dir = projDirPath(proj);
@@ -422,6 +442,7 @@
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) }).then(function (r) { return r.json(); });
   }
   async function syncDrive(url, silent) {
+    await syncProjDates();
     var auth = { deviceId: S.settings.deviceId, token: S.settings.token || '' };
     var allProj = projects(), csvCount = 0, imgCount = 0, failed = [];
     var sentMap = await kvGet('imgSynced') || {}, stamp = ymd();
@@ -432,7 +453,7 @@
       try {
         var lab = buildLabelCSV(proj);
         if (lab) {
-          var lr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: gname, fileName: labelCsvName(proj, stamp), csv: lab }, auth));
+          var lr = await postSync(url, Object.assign({ action: 'driveCsv', proj: projSaveName(proj), group: gname, fileName: labelCsvName(proj, stamp), csv: lab }, auth));
           if (lr && lr.ok) { csvCount++; ok = true; }
         }
       } catch (e) {}
@@ -440,7 +461,7 @@
       try {
         var built = await buildCSV(proj);
         if (built) {
-          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: proj.name, group: gname, fileName: built.name, csv: built.csv }, auth));
+          var cr = await postSync(url, Object.assign({ action: 'driveCsv', proj: projSaveName(proj), group: gname, fileName: built.name, csv: built.csv }, auth));
           if (cr && cr.ok) { csvCount++; ok = true; }
         }
       } catch (e) {}
@@ -448,7 +469,7 @@
       try {
         var xlg = await buildXLSX(proj);
         if (xlg) {
-          var xr = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: gname, fileName: xlg.name, mime: XLSX_MIME, dataB64: bytesToB64(xlg.data) }, auth));
+          var xr = await postSync(url, Object.assign({ action: 'driveFile', proj: projSaveName(proj), group: gname, fileName: xlg.name, mime: XLSX_MIME, dataB64: bytesToB64(xlg.data) }, auth));
           if (xr && xr.ok) { csvCount++; ok = true; }
         }
       } catch (e) {}
@@ -461,7 +482,7 @@
         if (!silent) toast(proj.name + ' 사진 전송 ' + (i + 1) + '/' + pending.length);
         try {
           var sendUrl = await syncPhotoURL(f.url);
-          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: proj.name, group: gname, fileName: f.name, mime: 'image/jpeg', dataB64: String(sendUrl).split(',')[1] || '' }, auth));
+          var r = await postSync(url, Object.assign({ action: 'driveFile', proj: projSaveName(proj), group: gname, fileName: f.name, mime: 'image/jpeg', dataB64: String(sendUrl).split(',')[1] || '' }, auth));
           if (r && r.ok) { sentMap[f.name] = 1; await kvSet('imgSynced', sentMap); imgCount++; }
         } catch (e) { break; }
       }
@@ -633,7 +654,7 @@
     p.items.forEach(function (it) {
       var g = it.g;
       (g.lines || []).forEach(function (l) {
-        rows.push([++n, p.name, l.gen || g.label, l.label, l.pedigree || '', l.rep || '', l.block || '', l.zone || '', l.indivTotal || '', l.selected ? 'Y' : '']);
+        rows.push([++n, projSaveName(p), l.gen || g.label, l.label, l.pedigree || '', l.rep || '', l.block || '', l.zone || '', l.indivTotal || '', l.selected ? 'Y' : '']);
       });
     });
     return n ? rows.map(csvLine).join('\r\n') : null;
@@ -701,18 +722,75 @@
     if (pl) out.push('정식일(' + pl + ')');
     return out.join(' / ');
   }
+  /* 과제별 마지막 조사일
+   *   · 홈 화면 과제 카드에 보여 주고,
+   *   · 백업·내보내기·동기화 파일 이름의 날짜로도 쓴다.
+   *     (파일 이름에 '백업한 날' 을 넣으면 내용이 그대로여도 백업할 때마다 새 파일이 쌓인다)
+   *   updatePending() 에서 한 번에 계산해 S.projDates 에 담아 둔다.
+   */
+  function mdOf(ts) { var d = new Date(ts || Date.now()); return (d.getMonth() + 1) + '/' + d.getDate(); }
+  // 'M/D' 또는 'YYYY-MM-DD' 조사일 + 기록 시각 → 'YYYY-MM-DD'
+  function fullDateOf(label, ts) {
+    var t = new Date(ts || Date.now());
+    var m = String(label == null ? '' : label).match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/);
+    if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+    var m2 = String(label == null ? '' : label).match(/^(\d{1,2})\D(\d{1,2})$/);
+    if (!m2) return ymd(ts);
+    var d = new Date(t.getFullYear(), +m2[1] - 1, +m2[2]);
+    if (d.getTime() - t.getTime() > 60 * 86400000) d = new Date(t.getFullYear() - 1, +m2[1] - 1, +m2[2]);  // 해를 넘긴 조사일
+    return ymd(d.getTime());
+  }
+  function refreshProjDates(all) {
+    var byGen = {};
+    S.gens.forEach(function (g) { byGen[g.id] = projKeyOf(g); });
+    var best = {};
+    (all || []).forEach(function (r) {
+      var k = byGen[r.genId]; if (!k) return;
+      var at = r.updatedAt || 0, b = best[k];
+      if (!b || at > b.at) best[k] = { at: at, date: r.date || '' };
+    });
+    var out = {};
+    Object.keys(best).forEach(function (k) {
+      var b = best[k];
+      out[k] = { has: true, label: b.date || mdOf(b.at), ymd: fullDateOf(b.date, b.at) };
+    });
+    // 조사 기록이 없는 과제는 마지막으로 만든 조사일(= 과제를 만들거나 고친 날)을 쓴다
+    projects().forEach(function (p) {
+      if (out[p.id]) return;
+      var lab = '', at = 0;
+      p.items.forEach(function (it) {
+        var ds = it.g.surveyDates || [];
+        ds.forEach(function (d) { if (!lab || dOrd(d) > dOrd(lab)) lab = d; });
+      });
+      out[p.id] = { has: false, label: lab || mdOf(0), ymd: fullDateOf(lab, at || Date.now()) };
+    });
+    S.projDates = out;
+  }
+  function projDate(p) { return (S.projDates || {})[p && p.id] || null; }
+  async function syncProjDates() { refreshProjDates(await obsAll()); }
+  // 아직 계산되지 않은 과제가 있으면 한 번 채우고 홈을 다시 그린다
+  function ensureProjDates() {
+    if (S._pdBusy) return;
+    var need = projects().some(function (p) { return !(S.projDates || {})[p.id]; });
+    if (!need) return;
+    S._pdBusy = 1;
+    syncProjDates().then(function () { S._pdBusy = 0; if (S.view === 'home') renderHome(); });
+  }
+  // 파일 이름에 넣을 날짜 — 그 과제의 마지막 조사일
+  function projStamp(p) { var d = projDate(p); return (d && d.ymd) || ymd(); }
+
   // 야장 CSV — 롱포맷(통계 분석용). 엑셀 야장과 같은 이름 규칙을 쓴다.
   function csvFileName(p, stamp) {
     var gn = projGroupName(p);
-    return (gn ? gn + '_' : '') + safeName(p ? p.name : '') + '_야장(통계 분석용)_' + (stamp || ymd()) + '.csv';
+    return (gn ? gn + '_' : '') + safeName(projSaveName(p)) + '_야장(통계 분석용)_' + projStamp(p) + '.csv';
   }
   function labelCsvName(p, stamp) {
     var gn = projGroupName(p);
-    return (gn ? gn + '_' : '') + safeName(p ? p.name : '') + '_라벨목록_' + (stamp || ymd()) + '.csv';
+    return (gn ? gn + '_' : '') + safeName(projSaveName(p)) + '_라벨목록_' + projStamp(p) + '.csv';
   }
   function xlsxFileName(p, stamp) {
     var gn = projGroupName(p);
-    return (gn ? gn + '_' : '') + safeName(p ? p.name : '') + '_야장(사용자 조사용)_' + (stamp || ymd()) + '.xlsx';
+    return (gn ? gn + '_' : '') + safeName(projSaveName(p)) + '_야장(사용자 조사용)_' + projStamp(p) + '.xlsx';
   }
 
   var XLSX_STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -834,7 +912,7 @@
     var head = ['No.', '라벨번호', '품종명/Pedigree', '세대', '반복', '개체'];
     var out = [];
     // 1행 · 2행 — 과제 목표 / 경종 개요
-    out.push('<row r="1" ht="20" customHeight="1">' + xcell('A1', '과제 목표', 1, true) + xcell('B1', p.name, 2, true) + '</row>');
+    out.push('<row r="1" ht="20" customHeight="1">' + xcell('A1', '과제 목표', 1, true) + xcell('B1', projSaveName(p), 2, true) + '</row>');
     out.push('<row r="2" ht="34" customHeight="1">' + xcell('A2', '경종 개요', 1, true) + xcell('B2', croppingText(p), 2, true) + '</row>');
     // 5행 — 제목행
     var h5 = '';
@@ -881,7 +959,7 @@
     var merges = '<mergeCells count="2"><mergeCell ref="B1:F1"/><mergeCell ref="B2:' + mergeEnd + '2"/></mergeCells>';
 
     var data = makeXlsxBytes({
-      sheetName: p.name, rows: out.join(''), cols: cw, merges: merges,
+      sheetName: projSaveName(p), rows: out.join(''), cols: cw, merges: merges,
       dim: 'A1:' + colLetter(nCol) + Math.max(6, r - 1)
     });
     return { name: xlsxFileName(p), data: data, rows: r - 6, cols: cols.length, capped: capped };
@@ -889,6 +967,7 @@
 
   async function buildBackupFiles(onStep, sink) {
     cleanFolders();
+    await syncProjDates();                 // 파일 이름에 넣을 '마지막 조사일' 을 최신으로
     var ps = projects();
     if (!ps.length) return null;
     var stamp = ymd(), files = [], summary = [], nCsv = 0, nImg = 0, bytes = 0, nFiles = 0;
@@ -1074,7 +1153,7 @@
           var sk = writer.skipped();
           toast((flat ? '선택한 폴더에 파일 ' : '백업 완료 · 과제 ' + b.projects + '개 · 파일 ') + writer.written() + (flat ? '개 저장됨' : '개') + (sk ? ' · 같은 사진 ' + sk + '장 건너뜀' : ''));
           S.lastBackup = Date.now();
-          kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+          S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
           return;
         }
         // 폴더에 쓰다가 막혔다 — 기억을 지우고 ZIP으로 넘어간다
@@ -1089,7 +1168,7 @@
         toast(gone ? '저장 폴더가 없어져 ZIP으로 저장했습니다 · 다시 누르면 폴더를 고를 수 있습니다'
                    : '폴더 저장이 막혀 ZIP으로 저장했습니다 · 파일 ' + b.files.length + '개');
         S.lastBackup = Date.now();
-        kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+        S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
         return;
       }
       // ── ZIP 저장 ──
@@ -1104,7 +1183,7 @@
       closeOverlay();
       toast('다운로드 폴더에 저장됨 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
       S.lastBackup = Date.now();
-      kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+      S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
     } catch (e) {
       closeOverlay();
       var m = (e && e.name === 'QuotaExceededError') ? '기기 저장 공간이 부족합니다'
@@ -1522,9 +1601,14 @@
     S.gens = S.gens.filter(function (g) { return ids.indexOf(g.id) < 0; });
     if (S.genIdx >= S.gens.length) S.genIdx = Math.max(0, S.gens.length - 1);
     obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (ids.indexOf(r.genId) >= 0) st.delete(r.k); }); });
+    var wasHome = S.view === 'home';
     kvSet('gens', S.gens).then(function () {
       if (S.gens.length) { var g2 = curGen(); S.lineIdx = 0; S.indiv = 1; S.date = g2.surveyDates[g2.surveyDates.length - 1]; S.trait = g2.traits[0] ? g2.traits[0].id : null; }
-      loadVals().then(function () { updatePending(); go('home'); });
+      loadVals().then(function () {
+        updatePending();
+        if (wasHome) renderHomeKeepScroll();        // 홈에서 지웠으면 보던 자리 그대로
+        else go('home');
+      });
     });
     toast('과제 삭제됨');
   }
@@ -1757,11 +1841,21 @@
         '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
       '</div>' +
-      '<div class="scroll-x" style="gap:6px;margin-top:9px">' + p.items.map(function (it) {
-        var on = it.idx === S.genIdx;
-        return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
-      }).join('') + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:9px">' +
+        '<div class="scroll-x" style="gap:6px;flex:1;min-width:0">' + p.items.map(function (it) {
+          var on = it.idx === S.genIdx;
+          return '<button class="pill hgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
+        }).join('') + '</div>' +
+        projDateChip(p) +
+      '</div>' +
     '</div>';
+  }
+  // 과제 카드 오른쪽 — 마지막 조사일 (조사 기록이 없으면 만들어 둔 조사일을 흐리게)
+  function projDateChip(p) {
+    var d = projDate(p); if (!d || !d.label) return '';
+    var col = d.has ? 'var(--text-secondary)' : 'var(--text-muted)';
+    return '<div style="flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:' + col + ';white-space:nowrap">' +
+      ico('calendar-event', d.has ? '#3B6D11' : 'var(--text-muted)', 12) + '조사 ' + esc(d.label) + '</div>';
   }
   // 과제 행을 꾹 눌러 다른 과제·폴더 위로 끌면 폴더로 묶임
   function setupProjDrag() {
@@ -1819,6 +1913,7 @@
   }
   function renderProjList() {
     cleanFolders();
+    ensureProjDates();
     var all = projects(), byId = {};
     all.forEach(function (p) { byId[p.id] = p; });
     var html = '', used = {};
@@ -1839,6 +1934,17 @@
     });
     all.forEach(function (p) { if (!used[p.id]) html += projRowHTML(p, false); });
     return html;
+  }
+  // 홈을 다시 그리되 보고 있던 자리(스크롤)를 그대로 둔다 — 과제·세대를 지운 뒤에 쓴다
+  function renderHomeKeepScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop || 0;
+    renderHome();
+    var back = function () {
+      var max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      window.scrollTo(0, Math.min(y, max));
+    };
+    back();
+    requestAnimationFrame(back);
   }
   function renderHome() {
     var v = $('view-home');
@@ -2267,7 +2373,19 @@
         b.onclick = function () { var cur = getValFor(t.id); var nv = (String(cur) === String(o)) ? '' : String(o); setVal(t.id, nv).then(function () { renderInput(); renderPills(); renderHist(); renderMap(); }); };
         wrap.appendChild(b);
       });
-      area.appendChild(wrap);
+      // 목록에 없는 값이 이미 들어 있으면 그 값도 칸으로 보여 준다 (예전 항목명·불러온 자료)
+      var vv = String(v == null ? '' : v).trim();
+      if (vv && !opts.some(function (o) { return String(o) === vv; })) {
+        var ob = document.createElement('button'); ob.className = 'btn';
+        ob.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px;background:#B0721A;border-color:#8A5A14;color:#fff';
+        ob.textContent = vv;
+        ob.onclick = function () { setVal(t.id, '').then(function () { renderInput(); renderPills(); renderHist(); renderMap(); }); };
+        wrap.appendChild(ob);
+        var w2 = document.createElement('div');
+        w2.style.cssText = 'font-size:11px;color:#B0721A;margin-top:8px;line-height:1.6';
+        w2.textContent = '‘' + vv + '’ 은(는) 지금 ' + (t.type === 'rating' ? '척도' : '항목') + ' 목록에 없는 값입니다. 값은 그대로 저장돼 있고, 눌러서 지우거나 형질 수정에서 목록에 다시 넣을 수 있습니다.';
+        area.appendChild(wrap); area.appendChild(w2);
+      } else area.appendChild(wrap);
       if (t.type === 'rating') { var note = document.createElement('div'); note.style.cssText = 'font-size:11px;color:var(--text-muted);margin-top:10px'; note.textContent = (typeof t.scale[0] === 'number') ? '척도 ' + t.scale.join('·') + ' · 평균 집계' : '표현형/유전형 등급 · 분포 집계'; area.appendChild(note); }
     } else if (t.type === 'date') {
       var inp = document.createElement('input'); inp.type = 'date'; inp.className = 'ein'; if (v) inp.value = v;
@@ -2339,10 +2457,10 @@
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">측정 단위</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div><input class="ein ' + px + '-unit" data-i="' + i + '" placeholder="직접 입력 (예: mmol/L)" style="height:36px;margin-top:6px;font-size:13px" value="' + esc(t.unit || '') + '"></div>';
     }
     if (t.type === 'rating') {
-      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다. 등급에는 <b>판독불가</b>가 자동 포함됩니다.</div></div>';
+      return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" data-old="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다. 등급에는 <b>판독불가</b>가 자동 포함됩니다.</div></div>';
     }
     if (t.type === 'categorical') {
-      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
+      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" data-old="' + esc(o) + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">항목 · 추가·이름 변경</div>' + items + '<button class="btn ' + px + '-optadd" data-i="' + i + '" style="width:100%;height:38px;font-size:13px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 항목 추가</button></div>';
     }
     if (t.type === 'text') {
@@ -2350,12 +2468,60 @@
     }
     return '';
   }
+  /* 항목·척도의 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바꾼다.
+     (예전에는 값이 옛 이름 그대로 남아 목록에 없는 글자가 되어 화면에서 사라진 것처럼 보였다) */
+  function teRename(tid, from, to) {
+    from = String(from == null ? '' : from).trim(); to = String(to == null ? '' : to).trim();
+    if (!from || !to || from === to) return;
+    S.teRenames = S.teRenames || [];
+    for (var i = 0; i < S.teRenames.length; i++) {
+      var r = S.teRenames[i];
+      if (r.tid === tid && r.from === from) { r.to = to; return; }   // 같은 칸을 또 고쳤으면 덮어쓴다
+    }
+    S.teRenames.push({ tid: tid, from: from, to: to });
+  }
+  // 적어 둔 이름 변경을 조사값에 한 번에 적용한다 (바뀐 값 개수를 돌려준다)
+  async function applyTraitRenames(g) {
+    var list = S.teRenames || []; S.teRenames = [];
+    if (!list.length || !g) return 0;
+    var byTrait = {};
+    list.forEach(function (r) { byTrait[r.tid] = byTrait[r.tid] || {}; if (!(r.from in byTrait[r.tid])) byTrait[r.tid][r.from] = r.to; });
+    var all = await obsAll(), n = 0;
+    await new Promise(function (res) {
+      var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
+      all.forEach(function (r) {
+        if (r.genId !== g.id) return;
+        var m = byTrait[r.traitId]; if (!m) return;
+        var v = String(r.value == null ? '' : r.value).trim();
+        if (!v || !(v in m)) return;
+        r.value = m[v]; r.updatedAt = Date.now(); r.dirty = 1;
+        st.put(r); n++;
+      });
+      tx.oncomplete = function () { res(); }; tx.onerror = function () { res(); };
+    });
+    return n;
+  }
   function syncTE() {
     var g = curGen();
     document.querySelectorAll('.tE-name').forEach(function (inp) { var t = g.traits[+inp.getAttribute('data-i')]; if (t) t.name = inp.value.trim() || t.name; });
     document.querySelectorAll('.tE-unit').forEach(function (inp) { var t = g.traits[+inp.getAttribute('data-i')]; if (t) t.unit = inp.value.trim(); });
-    document.querySelectorAll('.tE-scale').forEach(function (inp) { var t = g.traits[+inp.getAttribute('data-i')]; if (t) t.scale = parseScale(inp.value); });
-    g.traits.forEach(function (t, i) { if (t.type === 'categorical') { var arr = []; document.querySelectorAll('.tE-opt[data-i="' + i + '"]').forEach(function (inp) { var val = inp.value.trim(); if (val) arr.push(val); }); t.options = arr.length ? arr : ['항목1']; } });
+    document.querySelectorAll('.tE-scale').forEach(function (inp) {
+      var t = g.traits[+inp.getAttribute('data-i')]; if (!t) return;
+      var next = parseScale(inp.value), prev = parseScale(inp.getAttribute('data-old') || '');
+      for (var k = 0; k < Math.min(prev.length, next.length); k++) teRename(t.id, prev[k], next[k]);
+      inp.setAttribute('data-old', next.join(' '));
+      t.scale = next;
+    });
+    g.traits.forEach(function (t, i) {
+      if (t.type !== 'categorical') return;
+      var arr = [];
+      document.querySelectorAll('.tE-opt[data-i="' + i + '"]').forEach(function (inp) {
+        var val = inp.value.trim(), old = inp.getAttribute('data-old');
+        if (val && old) { teRename(t.id, old, val); inp.setAttribute('data-old', val); }
+        if (val) arr.push(val);
+      });
+      t.options = arr.length ? arr : ['항목1'];
+    });
   }
   function renderTraitEditor() {
     var g = curGen(), v = $('view-collect');
@@ -2373,10 +2539,17 @@
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
       '<div style="flex:1;padding:14px 14px;overflow:auto" id="tEScroll"><div id="tEList">' + rows + '</div>' +
         '<button class="btn" id="tEAdd" style="width:100%;height:46px;font-size:14px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 18) + ' 형질 추가</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러 끌어도 됩니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있고, 이름·종류를 바꿔도 기존 입력값은 유지됩니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러 끌어도 됩니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있습니다. <b>항목·척도의 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바뀝니다.</b></div>' +
       '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="tEDone" style="width:100%;height:48px;font-size:15px">완료</button></div>';
-    function done() { syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null; kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); }); }
+    function done() {
+      syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null;
+      applyTraitRenames(g)
+        .then(function (n) { if (n) { updatePending(); toast('바뀐 이름에 맞춰 조사값 ' + n + '건도 함께 고쳤습니다'); } })
+        .then(function () { return kvSet('gens', S.gens); })
+        .then(function () { return loadVals(); })
+        .then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); });
+    }
     $('tEBack').onclick = done; $('tEDone').onclick = done;
     v.querySelectorAll('.tE-name').forEach(function (inp) { inp.onchange = function () { var t = g.traits[+inp.getAttribute('data-i')]; t.name = inp.value.trim() || t.name; }; });
     v.querySelectorAll('.tE-type').forEach(function (sel) { sel.onchange = function () { syncTE(); var t = g.traits[+sel.getAttribute('data-i')]; t.type = sel.value; if (t.type === 'rating' && !t.scale) t.scale = withUnreadable([1, 3, 5, 7, 9]); if (t.type === 'categorical' && (!t.options || !t.options.length)) t.options = ['항목1', '항목2', '항목3']; normalizeUnit(t); t.series = inferSeries(t); renderTraitEditor(); }; });
@@ -3707,6 +3880,7 @@
   // 여러 과제를 모아 ZIP 하나로 저장
   async function exportBundle(list, opts, zipName, label) {
     if (!list || !list.length) { toast('내보낼 과제가 없습니다'); return; }
+    await syncProjDates();
     backupProgress('자료를 모으는 중…');
     await bkYield();
     try {
@@ -3766,7 +3940,7 @@
   }
   function exportProjBundle() {
     var p = curProject(); if (!p) { toast('과제를 찾을 수 없습니다'); return; }
-    exportBundle([p], {}, 'CropMemo_' + safeName(p.name) + '_{d}', '선택 과제 파일');
+    exportBundle([p], {}, 'CropMemo_' + safeName(projSaveName(p)) + '_{d}', '선택 과제 파일');
   }
   function exportAllBundle() {
     cleanFolders();
@@ -3927,7 +4101,7 @@
     seq.then(function () {
       if (!files.length) { toast('내보낼 사진·그림이 없습니다'); return; }
       try {
-        var base = (groupMode && fold) ? safeName(fold.name) : safeName(proj.name);
+        var base = (groupMode && fold) ? safeName(fold.name) : safeName(projSaveName(proj));
         downloadBlob(makeZipBlob(files), 'CropMemo_' + base + '_' + ymd() + '.zip');
         toast(files.length + '개 파일 ZIP 저장됨 · 과제 ' + list.length + '개');
       } catch (e) { toast('ZIP 생성 실패 · 사진이 너무 많을 수 있습니다'); }
@@ -4016,8 +4190,6 @@
   }
 
   function renderSettings() {
-    // 담아 둔 의견이 있으면 설정 화면을 열 때 조용히 다시 보낸다
-    if (S.fbPending) flushFeedback(true).then(function (n) { if (n && S.view === 'settings') renderSettings(); });
     var v = $('view-settings'), st = S.settings, prov = st.provider || 'gas';
     function sect(icon, title, sub) {
       return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><div style="width:26px;height:26px;border-radius:8px;background:var(--green-t);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico(icon, '#3B6D11', 15) + '</div>' +
@@ -4144,15 +4316,6 @@
           (S.user && S.user.email ? '<button class="btn" id="sUserChk" style="flex:0 0 96px;height:44px;font-size:13px;background:var(--surface-2)">상태 확인</button>' : '') +
         '</div>'
       ) +
-      card(
-        '<div style="font-size:13px;font-weight:600">의견 보내기</div>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;line-height:1.6">고쳤으면 하는 점·불편한 점을 적어 보내주세요. 등록한 이메일과 함께 관리자에게 전달됩니다.</div>' +
-        '<textarea class="ein" id="sFbTxt" style="height:88px;padding:9px 12px;resize:none;margin-top:9px;line-height:1.6" placeholder="예) 조사 화면에서 개체 번호를 바로 골라 이동하고 싶습니다."></textarea>' +
-        '<div style="display:flex;gap:8px;margin-top:9px;align-items:center">' +
-          '<span id="sFbMsg" style="flex:1;min-width:0;font-size:11px;color:var(--text-muted);line-height:1.5">' + fbHint() + '</span>' +
-          '<button class="btn primary" id="sFbSend" style="flex:0 0 96px;height:44px;font-size:13.5px">보내기</button>' +
-        '</div>'
-      ) +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.7;text-align:center">Crop Memo Pro · 버전정보 ' + APP_VERSION + '<br>현장에서 인터넷 없이 저장되고, 연결되면 시트·드라이브로 동기화됩니다.</div>' +
       '</div>';
 
@@ -4194,18 +4357,6 @@
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     if ($('sGuide')) $('sGuide').onclick = function () { openGuide(); };
     if ($('sUser')) $('sUser').onclick = function () { go('signup'); };
-    if ($('sFbSend')) $('sFbSend').onclick = async function () {
-      var box = $('sFbTxt'), msg = $('sFbMsg'), txt = (box.value || '').trim();
-      if (!txt) { msg.style.color = '#B0721A'; msg.textContent = '보낼 내용을 적어 주세요.'; box.focus(); return; }
-      if (!(S.user && S.user.email)) { toast('먼저 사용자 등록을 해주세요'); go('signup'); return; }
-      this.disabled = true; msg.style.color = 'var(--text-muted)'; msg.textContent = '보내는 중…';
-      var r = await sendFeedback(txt);
-      this.disabled = false;
-      box.value = '';
-      msg.style.color = r.ok ? '#3B6D11' : '#B0721A';
-      msg.textContent = r.ok ? '보냈습니다. 고맙습니다!' : '지금은 보내지 못해 저장해 두었습니다 · 연결되면 자동으로 보냅니다';
-      toast(r.ok ? '의견을 보냈습니다' : '연결되면 자동으로 보냅니다');
-    };
     if ($('sUserChk')) $('sUserChk').onclick = function () {
       toast('상태 확인 중…');
       guardUser().then(function (st) { renderSettings(); if (st !== 'BLOCKED') toast('승인됨 (ACTIVE)'); });
@@ -4281,7 +4432,7 @@
 
       { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기 · 불러오기',
         body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽에서 <b>+ 새 과제</b>로 새로 만들고, <b>불러오기</b>로 기기에 백업해 둔 과제를 되살립니다.',
-        note: '불러오기는 백업 ZIP · 과제/모음 폴더 · CSV를 받습니다. 생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
+        note: '불러오기는 백업 ZIP · 과제/모음 폴더 · CSV · Excel 야장(.xlsx)을 받습니다. 생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
         calls: [gc('hNew', 1, 'left'), gc('hLoad', 2, 'right')] },
 
       { img: '03-wizard1', chap: '과제 생성 3단계 · 1 / 3', title: '① 과제 정보',
@@ -4309,7 +4460,7 @@
 
       { img: '11-traitedit', chap: '야장 수집', title: '형질 수정 · 추가',
         body: '형질세트 편집에서 <b>이름 · 유형 · 단위</b>를 바꾸고 순서 이동·삭제·추가를 합니다.',
-        note: '모든 형질은 조사일마다 값이 따로 쌓입니다. 조사일을 새로 만들면 그 날짜는 빈 칸에서 시작하고, 앞선 조사일의 값은 그대로 남습니다.' },
+        note: '항목형의 항목이나 등급의 척도 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바뀝니다. 목록에서 빠진 값은 조사 화면에 주황색 칸으로 남아 그대로 보입니다.' },
 
       { img: '09-collect', chap: '야장 수집', title: '값 입력과 화면 넘기기',
         body: '값은 <b>입력하는 즉시 기기에 저장</b>됩니다.<br>화면을 <b>좌우로 밀면 개체</b>, <b>위아래로 밀면 라벨번호</b>가 넘어갑니다.',
@@ -4346,7 +4497,7 @@
 
       { img: '16-backup', chap: '기기 백업', title: '내 기기에 자료 백업 하기',
         body: '홈의 <b>기기 백업</b>을 누르면 백업 폴더 선택 후 백업이 진행 됩니다. 전체 과제의 모든 데이터, 사진 자료가 저장됩니다.',
-        note: 'Chrome 브라우저 앱 설치시 정상 백업 지원 되며, 다른 브라우저 앱 설치의 경우 ZIP 파일 다운로드로 진행됩니다.',
+        note: 'Chrome 브라우저 앱 설치시 정상 백업 지원 되며, 다른 브라우저 앱 설치의 경우 ZIP 파일 다운로드로 진행됩니다. 파일 이름의 날짜는 그 과제의 마지막 조사일이라, 조사 내용이 그대로면 백업해도 같은 파일에 덮어씁니다.',
         calls: [gc('bkCard', 1)] },
 
       { img: '19-xlsx', doc: true, chap: '받는 파일', title: 'Excel 야장 (사용자 조사용)',
@@ -4568,12 +4719,149 @@
     var m = fileName.match(/^CropMemo_(.+?)_(야장|라벨목록|사진)_/);
     if (m) return { group: '', proj: m[1], flat: true };
     var base = fileName.replace(/\.[^.]+$/, '');
-    var m2 = base.match(/^(.+)_(야장|라벨목록)_/);                       // 기기 백업 파일명
+    var m2 = base.match(/^(.+?)_(야장|라벨목록)(\([^)]*\))?_\d{4}-\d{2}-\d{2}$/)   // 야장(사용자 조사용)_일자 …
+          || base.match(/^(.+)_(야장|라벨목록)_/);                        // 기기 백업 파일명
     if (m2) return { group: '', proj: m2[1] };
     var m3 = base.match(/^(.+)_[^_]*-[^_]*_\d{4}-\d{2}-\d{2}$/);        // 내보내기 파일명(과제명_처음라벨-마지막라벨_일자)
     if (m3) return { group: '', proj: m3[1] };
     var m4 = base.match(/^(.+)_\d{4}-\d{2}-\d{2}$/);
     return { group: '', proj: m4 ? m4[1] : base };
+  }
+
+
+  /* ==========================================================
+   * 엑셀(.xlsx) 불러오기
+   *   · 앱이 내보낸 '야장(사용자 조사용).xlsx' — 5행 제목행 + G열부터 형질(단위, 조사일) 가로 표
+   *     → 야장 CSV와 같은 롱포맷(한 줄 = 개체 하나의 형질 하나)으로 펴서 읽는다.
+   *   · 그 밖의 표 — 첫 줄이 제목행인 라벨목록/야장 표를 그대로 읽는다.
+   *   읽기는 이미 들어 있는 xlsx.min.js(SheetJS)를 쓴다. 오프라인에서도 캐시로 동작한다.
+   * ========================================================== */
+  function xlsxReady() { return new Promise(function (res) { ensureXLSX(res); }); }
+  async function xlsxSheetRows(u8) {
+    var ok = await xlsxReady();
+    if (!ok || typeof XLSX === 'undefined') throw new Error('엑셀을 읽는 기능을 불러오지 못했습니다');
+    var wb = XLSX.read(u8, { type: 'array' });
+    return (wb.SheetNames || []).map(function (n) {
+      var ws = wb.Sheets[n];
+      return { name: n, rows: ws ? XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, raw: false, defval: '' }) : [] };
+    });
+  }
+  function cellTxt(v) { return String(v == null ? '' : v).trim(); }
+  // 형질 머리글 '과장(mm, 8/8)' · '노균병(1~9, 6/20)' · '과형(8/8)' · '비고' 를 뜯는다
+  function xlsxTraitHead(head) {
+    var h = cellTxt(head); if (!h) return null;
+    var m = h.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+    if (!m) return { name: h, unit: '', date: '', kind: '' };
+    var name = m[1].trim() || h, inside = m[2], unit = '', date = '';
+    var parts = inside.split(',');
+    if (parts.length >= 2) { unit = parts[0].trim(); date = parts.slice(1).join(',').trim(); }
+    else if (looksLikeDate(inside)) date = inside.trim();
+    else unit = inside.trim();
+    var meta = xlsxUnitKind(unit);
+    return { name: name, unit: meta.unit, date: date, kind: meta.kind };
+  }
+  function looksLikeDate(v) {
+    var t = cellTxt(v);
+    return /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(t) || /^\d{1,2}[-/.]\d{1,2}$/.test(t);
+  }
+  // 단위 자리에 적힌 값으로 형질 종류를 되살린다 (내보낼 때 쓴 규칙의 반대)
+  function xlsxUnitKind(unit) {
+    var u = cellTxt(unit);
+    if (!u) return { unit: '', kind: '' };
+    if (u === '%') return { unit: '%', kind: '비율(%)' };
+    if (u === '개') return { unit: '개', kind: '카운터' };
+    if (/^\d+\s*~\s*\d+$/.test(u)) return { unit: '', kind: '등급' };                       // 1~9
+    if (/^[^\s/]{1,6}(\/[^\s/]{1,6}){1,6}$/.test(u)) return { unit: '', kind: '등급' };      // R/IR/S
+    return { unit: u, kind: '' };
+  }
+  // 시트 한 장 → { kind:'obs'|'lines'|'', objs:[…], proj:'' }
+  function xlsxSheetToRows(rows) {
+    if (!rows || !rows.length) return null;
+    // 1) 앱이 만든 야장(사용자 조사용) — 'No.' 로 시작하고 라벨번호·개체가 있는 제목행을 찾는다
+    var hr = -1;
+    for (var i = 0; i < Math.min(rows.length, 15); i++) {
+      var r = rows[i] || [];
+      if (cellTxt(r[0]) === 'No.' && r.some(function (c) { return cellTxt(c) === '라벨번호'; })
+          && r.some(function (c) { return cellTxt(c) === '개체'; })) { hr = i; break; }
+    }
+    if (hr >= 0) {
+      var head = rows[hr] || [];
+      var col = {};
+      ['No.', '라벨번호', '품종명/Pedigree', '세대', '반복', '개체'].forEach(function (k) {
+        for (var c = 0; c < head.length; c++) if (cellTxt(head[c]) === k) { col[k] = c; break; }
+      });
+      if (col['라벨번호'] == null) return null;
+      var first = Math.max.apply(null, [0].concat(Object.keys(col).map(function (k) { return col[k]; }))) + 1;
+      var traits = [];
+      for (var c2 = first; c2 < head.length; c2++) {
+        var t = xlsxTraitHead(head[c2]); if (t && t.name) traits.push({ c: c2, t: t });
+      }
+      var objs = [], no = 0, lineMap = {}, lineOrder = [];
+      for (var rI = hr + 1; rI < rows.length; rI++) {
+        var row = rows[rI] || [], label = cellTxt(row[col['라벨번호']]);
+        if (!label) continue;
+        var base = {
+          '라벨번호': label,
+          '품종명/Pedigree': col['품종명/Pedigree'] != null ? cellTxt(row[col['품종명/Pedigree']]) : '',
+          '세대': col['세대'] != null ? cellTxt(row[col['세대']]) : '',
+          '반복': col['반복'] != null ? cellTxt(row[col['반복']]) : '',
+          '개체': col['개체'] != null ? cellTxt(row[col['개체']]) : '1'
+        };
+        // 값이 비어 있는 개체 줄도 세어 둔다 — 라벨별 개체수를 그대로 살리기 위해
+        var lk = base['세대'] + '|' + label + '|' + base['반복'];
+        if (!lineMap[lk]) { lineMap[lk] = { '라벨번호': label, '품종명/Pedigree': base['품종명/Pedigree'], '세대': base['세대'], '반복': base['반복'], '개체수': 0 }; lineOrder.push(lk); }
+        var ivN = parseInt(base['개체'], 10) || 1;
+        if (ivN > lineMap[lk]['개체수']) lineMap[lk]['개체수'] = ivN;
+        for (var ti = 0; ti < traits.length; ti++) {
+          var v = cellTxt(row[traits[ti].c]); if (v === '') continue;
+          var tt = traits[ti].t;
+          objs.push({
+            'No.': String(++no), '라벨번호': base['라벨번호'], '품종명/Pedigree': base['품종명/Pedigree'],
+            '세대': base['세대'], '반복': base['반복'], '개체': base['개체'],
+            '조사일': tt.date, '형질': tt.name, '값': v, '단위': tt.unit,
+            '형질 수집형태': tt.kind, '조합, 계통 선발': '', '개체 선발': ''
+          });
+        }
+      }
+      // A1/A2 머리말에서 과제명 (A1 '과제 목표' 오른쪽 칸)
+      var proj = '';
+      for (var hi = 0; hi < hr; hi++) {
+        var hrow = rows[hi] || [];
+        if (cellTxt(hrow[0]) === '과제 목표') { proj = cellTxt(hrow[1]); break; }
+      }
+      var parts = [];
+      if (lineOrder.length) {
+        parts.push({ kind: 'lines', proj: proj, objs: lineOrder.map(function (k) { var l = lineMap[k]; l['개체수'] = String(l['개체수'] || 1); return l; }) });
+      }
+      if (objs.length) parts.push({ kind: 'obs', objs: objs, proj: proj });
+      return parts.length ? parts : null;
+    }
+    // 2) 그 밖의 표 — 첫 줄을 제목행으로 보고 그대로 읽는다 (라벨목록 · 롱포맷 야장)
+    var hIdx = -1;
+    for (var k2 = 0; k2 < Math.min(rows.length, 10); k2++) {
+      var line = (rows[k2] || []).map(cellTxt).join(',');
+      if (csvKind(line)) { hIdx = k2; break; }
+    }
+    if (hIdx < 0) return null;
+    var head2 = (rows[hIdx] || []).map(cellTxt);
+    var kind2 = csvKind(head2.join(','));
+    var out = [];
+    for (var r2 = hIdx + 1; r2 < rows.length; r2++) {
+      var rr = rows[r2] || [], o = {}, any = false;
+      head2.forEach(function (h, ci) { if (!h) return; o[h] = cellTxt(rr[ci]); if (o[h] !== '') any = true; });
+      if (any) out.push(o);
+    }
+    return out.length ? [{ kind: kind2, objs: out, proj: '' }] : null;
+  }
+  // 엑셀 파일 한 개 → 시트별로 읽은 결과 목록
+  async function xlsxImportParts(u8) {
+    var sheets = await xlsxSheetRows(u8), parts = [];
+    for (var i = 0; i < sheets.length; i++) {
+      var got = null;
+      try { got = xlsxSheetToRows(sheets[i].rows); } catch (e) { got = null; }
+      if (got) got.forEach(function (g2) { g2.sheet = sheets[i].name; parts.push(g2); });
+    }
+    return parts;
   }
 
   // ----- 파일들을 과제별로 묶어 불러올 계획을 만든다 -----
@@ -4597,6 +4885,30 @@
       } else if (/\.(jpe?g|png)$/i.test(nm)) {
         var w2 = importWhere(e.path, nm), sl2 = slot(w2);
         sl2.photos.push({ name: nm, data: e.data });
+      }
+    }
+    // 엑셀(.xlsx) — CSV 를 먼저 다 읽은 뒤에 본다.
+    // 백업 ZIP 에는 같은 과제의 CSV 와 엑셀이 함께 들어 있으므로, 이미 CSV 로 읽은 과제는 건너뛴다.
+    var xls = entries.filter(function (x) { return /\.xlsx$/i.test(x.name || ''); });
+    for (var xi = 0; xi < xls.length; xi++) {
+      var xe = xls[xi];
+      if (onStep) onStep('엑셀 읽는 중 ' + (xi + 1) + '/' + xls.length + '\n' + (xe.name || ''), 0.55);
+      await bkYield();
+      var parts = [];
+      try { parts = await xlsxImportParts(xe.data); } catch (err) { parts = []; }
+      for (var pj = 0; pj < parts.length; pj++) {
+        var pt = parts[pj];
+        var wx = importWhere(xe.path, xe.name);
+        if (pt.proj) {
+          var gx = wx.group;
+          // 파일명이 '모음_과제명_야장(…)' 이면 앞부분을 모음 폴더로 되살린다
+          if (!gx && wx.proj !== pt.proj && wx.proj.length > pt.proj.length &&
+              wx.proj.slice(-(pt.proj.length + 1)) === '_' + pt.proj) gx = wx.proj.slice(0, wx.proj.length - pt.proj.length - 1);
+          wx = { group: gx, proj: pt.proj };                            // 엑셀 A1 옆 칸의 과제명을 우선
+        }
+        var slx = slot(wx);
+        if (pt.kind === 'lines') { if (!slx.lineRows) { slx.lineRows = pt.objs; if (pt.objs[0] && pt.objs[0]['과제명']) slx.projFromCsv = pt.objs[0]['과제명']; } }
+        else if (pt.kind === 'obs') { if (!slx.obsRows.length) slx.obsRows = pt.objs; }
       }
     }
     // 평면 파일명에서 모음_과제 를 분리 (라벨목록 CSV의 과제명 열이 있으면 그걸로)
@@ -4850,7 +5162,7 @@
       if (h.kind === 'directory') await entriesFromDir(h, prefix + '/' + nm, out, onStep);
       else {
         var f = await h.getFile();
-        if (!/\.(csv|jpe?g|png|zip)$/i.test(nm)) continue;
+        if (!/\.(csv|xlsx|jpe?g|png|zip)$/i.test(nm)) continue;
         var buf = new Uint8Array(await f.arrayBuffer());
         if (/\.zip$/i.test(nm)) { try { out.push.apply(out, await unzipEntries(buf)); } catch (e) {} }
         else out.push({ path: prefix + '/' + nm, name: nm, data: buf });
@@ -4866,12 +5178,12 @@
     openOverlay(
       '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 과제 불러오기</div>' +
       '<div class="ovl-msg">기기에 저장해 둔 백업에서 과제를 되살립니다.<br>' +
-        '<b>백업 ZIP · 과제 폴더 · 모음 폴더 · 야장/라벨목록 CSV</b> 중 하나를 고르세요.</div>' +
+        '<b>백업 ZIP · 과제 폴더 · 모음 폴더 · 야장/라벨목록 CSV · Excel 야장</b> 중 하나를 고르세요.</div>' +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">' +
-        '<button class="btn primary" id="imFile" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-upload', '#fff', 18) + ' 파일 선택 (ZIP · CSV)</button>' +
+        '<button class="btn primary" id="imFile" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-upload', '#fff', 18) + ' 파일 선택 (ZIP · CSV · Excel)</button>' +
         (canDir ? '<button class="btn" id="imDir" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('folder', 'var(--text-primary)', 18) + ' 폴더 선택 (과제 · 모음 폴더)</button>' : '') +
       '</div>' +
-      '<input type="file" id="imInput" accept=".zip,.csv,.jpg,.jpeg,.png" multiple style="display:none">' +
+      '<input type="file" id="imInput" accept=".zip,.csv,.xlsx,.jpg,.jpeg,.png" multiple style="display:none">' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">불러온 과제는 <b>새 과제로 추가</b>됩니다. 지금 있는 과제는 지워지지 않습니다.</div>' +
       '<div class="ovl-btns"><button class="btn" id="imCancel">취소</button></div>'
     );
@@ -4919,7 +5231,7 @@
     openOverlay(
       '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 불러올 과제 ' + plan.length + '개</div>' +
       '<div style="margin-top:8px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:190px;overflow:auto">' + rows + '</div>' +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">새 과제로 추가됩니다. 형질은 CSV의 <b>형질 수집형태</b> 열을 그대로 따르고, 그 열이 없는 옛 파일은 값에서 추정합니다. 등급 척도·항목 목록은 실제로 쓰인 값에서 되살리니 불러온 뒤 <b>과제 수정 → 형질 편집</b>에서 확인해 주세요.</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">새 과제로 추가됩니다. 형질은 CSV의 <b>형질 수집형태</b> 열을 그대로 따르고, 그 열이 없는 파일(엑셀 포함)은 값과 단위에서 추정합니다. 등급 척도·항목 목록은 실제로 쓰인 값에서 되살리니 불러온 뒤 <b>과제 수정 → 형질 편집</b>에서 확인해 주세요.</div>' +
       '<div class="ovl-btns"><button class="btn" id="ipCancel">취소</button><button class="btn primary" id="ipOk">불러오기</button></div>'
     );
     $('ipCancel').onclick = closeOverlay;
@@ -4929,7 +5241,7 @@
         var r = await applyImportPlan(plan, bkStep);
         closeOverlay();
         toast('불러오기 완료 · 과제 ' + r.projects + '개 · 조사값 ' + r.obs + '건' + (r.photos ? ' · 사진 ' + r.photos + '장' : ''));
-        S.genIdx = 0; renderHome();
+        S.genIdx = 0; await updatePending(); renderHome();
       } catch (e) {
         closeOverlay(); toast('불러오기 실패 · ' + ((e && e.message) || '자료를 만들 수 없습니다'));
       }
@@ -5031,55 +5343,6 @@
     return u.status || 'ACTIVE';
   }
 
-  /* ----- 의견 보내기 -----
-   *   보낸 글은 구글 시트 Users 탭의 그 사용자 줄에서 '메모'(H열) 오른쪽 칸에 차례로 쌓인다.
-   *   오프라인이거나 전송에 실패하면 기기에 담아 두었다가 연결되면 자동으로 다시 보낸다.
-   */
-  async function fbQueue() { return (await kvGet('fbQ')) || []; }
-  function fbHint() {
-    var n = S.fbPending || 0;
-    if (n) return '보내지 못한 의견 ' + n + '건 · 연결되면 자동으로 보냅니다';
-    return S.fbSentAt ? ('마지막으로 보낸 때 ' + bkWhen(S.fbSentAt)) : '';
-  }
-  async function fbPost(item) {
-    var j = await postUser({ action: 'feedback', email: item.email, name: item.name || '', text: item.text,
-                             deviceId: S.settings.deviceId, app: APP_VERSION, at: item.at });
-    return !!(j && j.ok);
-  }
-  // 담아 둔 의견을 순서대로 다시 보낸다
-  async function flushFeedback(silent) {
-    if (S.fbBusy) return 0;
-    S.fbBusy = true;                       // 두 번 겹쳐 보내지 않도록 곧바로 잠근다
-    var sent = 0;
-    try {
-      var q = await fbQueue();
-      S.fbPending = q.length;
-      if (!q.length || !navigator.onLine || !userApi()) return 0;
-      while (q.length) {
-        var ok = false;
-        try { ok = await fbPost(q[0]); } catch (e) { ok = false; }
-        if (!ok) break;
-        q.shift(); sent++;
-        await kvSet('fbQ', q);
-      }
-      S.fbPending = q.length;
-      if (sent) { S.fbSentAt = Date.now(); await kvSet('fbSentAt', S.fbSentAt); if (!silent) toast('담아 둔 의견 ' + sent + '건을 보냈습니다'); }
-    } finally { S.fbBusy = false; }
-    return sent;
-  }
-  // 한 건 보내기 — 실패하면 기기에 담아 둔다
-  async function sendFeedback(text) {
-    var item = { text: text, email: (S.user && S.user.email) || '', name: (S.user && S.user.name) || '', at: Date.now() };
-    var q = await fbQueue();
-    if (navigator.onLine && userApi() && !q.length && !S.fbBusy) {
-      var ok = false;
-      try { ok = await fbPost(item); } catch (e) { ok = false; }
-      if (ok) { S.fbSentAt = item.at; S.fbPending = 0; await kvSet('fbSentAt', S.fbSentAt); return { ok: true }; }
-    }
-    q.push(item); await kvSet('fbQ', q); S.fbPending = q.length;
-    return { ok: false, queued: true };
-  }
-
   // 앱을 열 때 / 다시 온라인이 될 때 상태를 확인한다
   async function guardUser() {
     var st = await checkUserStatus();
@@ -5089,7 +5352,7 @@
   }
 
   // ---------- net ----------
-  function onNet() { if (navigator.onLine && S.user && S.user.email) { guardUser(); flushFeedback(true).then(function (n) { if (n && S.view === 'settings') renderSettings(); }); } if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
+  function onNet() { if (navigator.onLine && S.user && S.user.email) guardUser(); if (S.view === 'home') renderHome(); if (navigator.onLine && S.settings.syncOn !== false && S.settings.syncUrl && S.pending > 0) trySync(true); }
 
   // ---------- boot ----------
   // ---------- Android 뒤로가기 ----------
@@ -5107,6 +5370,11 @@
     });
     // 화면을 옮길 때마다 여유분을 유지
     window.addEventListener('cm-nav', function () { armBack(1); });
+    // 브라우저 탭·창을 닫을 때 — 백업 안 된 자료가 있을 때만 확인창이 뜬다
+    window.addEventListener('beforeunload', function (e) {
+      if (S._exitOk || S._exiting || !(S.bkPending > 0)) return;
+      e.preventDefault(); e.returnValue = '';
+    });
   }
   function onBack() {
     // 0) 사용 가이드가 떠 있으면 가이드부터 닫기
@@ -5125,10 +5393,37 @@
     if (S.view === 'genedit') { askSaveGenEdit(); return 'ok'; }
     // 4) 그 밖의 화면이면 홈으로
     if (S.view !== 'home') { go('home'); return 'ok'; }
-    // 5) 홈에서는 두 번 눌러 종료
-    if (Date.now() - (S._exitAt || 0) < 2000) return 'exit';
-    S._exitAt = Date.now(); toast('뒤로가기를 한 번 더 누르면 종료됩니다');
+    // 5) 홈에서 뒤로가기 → 닫기 전에 기기 백업을 권한다
+    if (S._exitOk) return 'exit';                 // 팝업에서 '그냥 닫기' 를 고른 경우
+    exitBackupPopup();
     return 'ok';
+  }
+  // 앱을 닫기 전에 뜨는 안내 — 마지막 백업 이후 저장한 자료가 있으면 백업을 권한다
+  function exitBackupPopup() {
+    if (document.getElementById('ovl')) return;
+    var n = S.bkPending || 0, ever = !!S.lastBackup;
+    var msg = n
+      ? '마지막 백업 이후 저장한 조사값이 <b style="color:#B0721A">' + n + '건</b> 있습니다.<br>닫기 전에 <b>기기 백업</b>을 해두시면 안전합니다.'
+      : (ever ? '마지막 백업 ' + bkWhen(S.lastBackup) + ' 이후 새로 저장된 자료가 없습니다.<br>그대로 닫아도 괜찮습니다.'
+              : '아직 기기 백업을 한 적이 없습니다.<br>닫기 전에 <b>기기 백업</b>을 해두시면 안전합니다.');
+    openOverlay(
+      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 앱을 닫을까요?</div>' +
+      '<div class="ovl-msg" style="line-height:1.7">' + msg + '</div>' +
+      '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">' +
+        '<button class="btn' + (n ? ' primary' : '') + '" id="xbBackup" style="height:48px;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('device-floppy', n ? '#fff' : 'var(--text-primary)', 18) + ' 지금 기기 백업</button>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;line-height:1.6">백업은 다운로드 폴더의 <b>CropMemo</b> 폴더에 저장됩니다. 기기에 저장된 자료는 앱을 닫아도 지워지지 않습니다.</div>' +
+      '<div class="ovl-btns"><button class="btn" id="xbStay">계속 쓰기</button>' +
+        '<button class="btn' + (n ? '' : ' primary') + '" id="xbClose"' + (n ? ' style="color:#C0392B;border-color:#E3B4AE"' : '') + '>' + (n ? '그냥 닫기' : '닫기') + '</button></div>'
+    );
+    $('xbStay').onclick = closeOverlay;
+    $('xbBackup').onclick = function () { closeOverlay(); startBackup(); };
+    $('xbClose').onclick = function () {
+      S._exitOk = true; closeOverlay();
+      if (window.CM_NATIVE) toast('뒤로가기를 한 번 더 누르면 닫힙니다');   // 앱은 하드웨어 뒤로가기로 닫힌다
+      else { try { history.back(); } catch (e) {} }                        // popstate → onBack() → 'exit'
+      setTimeout(function () { S._exitOk = false; }, 6000);                // 닫지 않았으면 원래대로
+    };
   }
   // 안드로이드 앱(네이티브)의 하드웨어 뒤로가기 → 위 onBack()을 그대로 사용.
   // true면 앱이 처리함, false면 네이티브가 앱을 종료한다.
@@ -5190,8 +5485,6 @@
       window.addEventListener('online', onNet); window.addEventListener('offline', onNet);
       document.addEventListener('pointerdown', function (e) { var t = e.target; if (t && t.closest && t.closest('button,.btn,.key,.pill,.sw,.tab,.mm')) haptic(12); }, { passive: true });
       S.user = await kvGet('user') || null;
-      S.fbSentAt = await kvGet('fbSentAt') || null;
-      S.fbPending = ((await kvGet('fbQ')) || []).length;
       go('home');
       setupBack();
       // 첫 실행이면 사용 가이드를 띄우고, 가이드가 끝나면 사용자 등록 화면으로 넘어간다
