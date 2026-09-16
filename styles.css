@@ -217,3 +217,14 @@ a{color:var(--green-d)}
 .gzbody img{max-width:none;flex:0 0 auto;display:block;border-radius:6px;background:#fff;cursor:zoom-in}
 
 .gframe.gdoc .gzhint{top:7px;bottom:auto}
+
+/* 형질세트 편집 — 오른쪽 끝에 늘 보이는 스크롤 띠.
+   카드를 건드리지 않고 이 띠로 넘길 수 있어, 넘기다 형질 순서가 바뀌지 않는다.
+   (안드로이드 기본 스크롤바는 넘길 때만 잠깐 보여서 직접 만든다) */
+.tewrap{position:relative}
+.tebar{position:fixed;right:0;width:17px;z-index:40;background:var(--surface-1);border-left:0.5px solid var(--border);
+  touch-action:none;cursor:pointer;-webkit-user-select:none;user-select:none}
+.tethumb{position:absolute;left:3px;right:3px;top:0;height:60px;border-radius:9px;background:#9FBE7C;
+  box-shadow:0 1px 3px rgba(0,0,0,.18);transition:background .15s}
+.tebar.on .tethumb{background:#639922}
+.tebar.hide{display:none}

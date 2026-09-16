@@ -2538,10 +2538,11 @@
     }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
-      '<div style="flex:1;padding:14px 14px;overflow:auto" id="tEScroll"><div id="tEList">' + rows + '</div>' +
+      '<div class="tewrap"><div class="tescroll" style="flex:1;padding:14px 26px 14px 14px" id="tEScroll"><div id="tEList">' + rows + '</div>' +
         '<button class="btn" id="tEAdd" style="width:100%;height:46px;font-size:14px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:6px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 18) + ' 형질 추가</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러 끌어도 됩니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있습니다. <b>항목·척도의 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바뀝니다.</b></div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:12px;line-height:1.6">' + ico('grip-vertical', 'var(--text-muted)', 13) + ' 손잡이를 끌거나 <b>▲▼ 버튼</b>으로 형질 순서를 바꿉니다. 카드를 꾹 눌러(0.65초) 끌어도 됩니다. 화면을 넘길 때는 <b>오른쪽 끝 띠</b>를 끌면 순서가 바뀌지 않습니다. 종류마다 아래 칸에서 단위·척도·항목을 설정할 수 있습니다. <b>항목·척도의 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바뀝니다.</b></div>' +
       '</div>' +
+      '<div class="tebar" id="tEBar"><div class="tethumb" id="tEThumb"></div></div></div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="tEDone" style="width:100%;height:48px;font-size:15px">완료</button></div>';
     function done() {
       syncTE(); S.traitEdit = false; var back = S.traitEditFrom; S.traitEditFrom = null;
@@ -2565,12 +2566,68 @@
     v.querySelectorAll('.tE-up').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (i <= 0) return; syncTE(); moveTrait(g, i, i - 1); }; });
     v.querySelectorAll('.tE-down').forEach(function (b) { b.onclick = function () { var i = +b.getAttribute('data-i'); if (i >= g.traits.length - 1) return; syncTE(); moveTrait(g, i, i + 1); }; });
     setupTraitReorder(g);
+    setupTraitScrollbar();
   }
   function moveTrait(g, from, to) {
     if (to < 0 || to >= g.traits.length || from === to) return;
     var t = g.traits.splice(from, 1)[0];
     g.traits.splice(to, 0, t);
     kvSet('gens', S.gens).then(function () { renderTraitEditor(); haptic(14); });
+  }
+  /* 형질세트 편집의 오른쪽 스크롤 띠 — 눌러서 그 자리로, 끌어서 따라 움직인다.
+     안드로이드 기본 스크롤바는 넘길 때만 잠깐 보여 잡기 어려워 직접 만든다.
+     이 화면은 창(window) 전체가 움직이므로 창 스크롤을 기준으로 계산한다. */
+  function setupTraitScrollbar() {
+    var bar = $('tEBar'), th = $('tEThumb');
+    if (!bar || !th) return;
+    var MIN = 46;
+    function place() {
+      var tb = document.getElementById('tabbar');
+      var bottom = (tb && !tb.classList.contains('hidden')) ? Math.max(0, window.innerHeight - tb.getBoundingClientRect().top) : 0;
+      bar.style.top = '0px'; bar.style.bottom = bottom + 'px';
+    }
+    function sizes() {
+      var vh = window.innerHeight, dh = document.documentElement.scrollHeight;
+      var bh = bar.clientHeight, max = Math.max(0, dh - vh);
+      var h = max ? Math.max(MIN, Math.round(bh * vh / dh)) : bh;
+      return { bh: bh, max: max, h: h, run: Math.max(1, bh - h) };
+    }
+    function paint() {
+      place();
+      var z = sizes();
+      if (!z.max) { bar.classList.add('hide'); return; }
+      bar.classList.remove('hide');
+      th.style.height = z.h + 'px';
+      var y = window.scrollY || document.documentElement.scrollTop || 0;
+      th.style.top = Math.round(y / z.max * z.run) + 'px';
+    }
+    function jump(clientY) {
+      var z = sizes(); if (!z.max) return;
+      var r = bar.getBoundingClientRect();
+      var y = clientY - r.top - z.h / 2;                     // 손가락이 손잡이 가운데에 오도록
+      window.scrollTo(0, Math.max(0, Math.min(z.max, y / z.run * z.max)));
+      paint();
+    }
+    var dragging = false;
+    function down(y) { dragging = true; bar.classList.add('on'); jump(y); }
+    function up() { if (!dragging) return; dragging = false; bar.classList.remove('on'); }
+    bar.addEventListener('pointerdown', function (e) { e.preventDefault(); e.stopPropagation(); down(e.clientY); });
+    bar.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) { e.preventDefault(); e.stopPropagation(); down(t.clientY); } }, { passive: false });
+    if (!S._tebarBound) {
+      S._tebarBound = true;
+      document.addEventListener('pointermove', function (e) { if (S._tebarMove) S._tebarMove(e.clientY, e); }, { passive: false });
+      document.addEventListener('touchmove', function (e) { var t = e.touches[0]; if (t && S._tebarMove) S._tebarMove(t.clientY, e); }, { passive: false });
+      document.addEventListener('pointerup', function () { if (S._tebarUp) S._tebarUp(); });
+      document.addEventListener('touchend', function () { if (S._tebarUp) S._tebarUp(); });
+      document.addEventListener('pointercancel', function () { if (S._tebarUp) S._tebarUp(); });
+      window.addEventListener('scroll', function () { if (S._tebarPaint) S._tebarPaint(); }, { passive: true });
+      window.addEventListener('resize', function () { if (S._tebarPaint) S._tebarPaint(); });
+    }
+    S._tebarMove = function (y, e) { if (!dragging) return; if (e && e.cancelable) e.preventDefault(); jump(y); };
+    S._tebarUp = up;
+    S._tebarPaint = function () { if (document.getElementById('tEBar')) paint(); else S._tebarPaint = null; };
+    paint();
+    setTimeout(paint, 80);                                   // 글꼴·그림이 자리잡은 뒤 한 번 더
   }
   function setupTraitReorder(g) {
     var list = $('tEList'); if (!list) return;
@@ -2621,7 +2678,7 @@
       h.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) { e.preventDefault(); startDrag(h.closest('.tE-card'), t.clientY); } }, { passive: false });
     });
     list.querySelectorAll('.tE-card').forEach(function (card) {
-      function press(y) { lp = setTimeout(function () { lp = null; startDrag(card, y); }, 420); }
+      function press(y) { lp = setTimeout(function () { lp = null; startDrag(card, y); }, 650); }
       card.addEventListener('pointerdown', function (e) { if (e.target.closest && e.target.closest('input,select,button,.sw')) return; press(e.clientY); });
       card.addEventListener('touchstart', function (e) { if (e.target.closest && e.target.closest('input,select,button,.sw')) return; var t = e.touches[0]; if (t) press(t.clientY); }, { passive: true });
     });
@@ -4461,7 +4518,7 @@
 
       { img: '11-traitedit', chap: '야장 수집', title: '형질 수정 · 추가',
         body: '형질세트 편집에서 <b>이름 · 유형 · 단위</b>를 바꾸고 순서 이동·삭제·추가를 합니다.',
-        note: '항목형의 항목이나 등급의 척도 이름을 바꾸면 이미 적어 둔 조사값도 새 이름으로 함께 바뀝니다. 목록에서 빠진 값은 조사 화면에 주황색 칸으로 남아 그대로 보입니다.' },
+        note: '항목·척도 이름을 바꾸면 이미 적어 둔 조사값도 함께 바뀝니다. 화면을 넘길 때는 오른쪽 끝의 스크롤 띠를 끌면 형질 순서가 바뀌지 않습니다.' },
 
       { img: '09-collect', chap: '야장 수집', title: '값 입력과 화면 넘기기',
         body: '값은 <b>입력하는 즉시 기기에 저장</b>됩니다.<br>화면을 <b>좌우로 밀면 개체</b>, <b>위아래로 밀면 라벨번호</b>가 넘어갑니다.',
