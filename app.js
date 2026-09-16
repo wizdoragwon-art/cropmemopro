@@ -70,10 +70,11 @@
   // ---------- image/file naming + ZIP ----------
   function safeName(s) { return String(s == null ? '' : s).replace(/[\\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim() || '무제'; }
   function ymd(ts) { var d = new Date(ts || Date.now()); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  // 사진 파일명 — 날짜는 '찍을 때의 조사일'(없으면 촬영 시각). 백업한 날이 아니라서 다시 백업해도 이름이 그대로다.
   function photoFileName(g, p) {
     var lab = '알수없음'; (g.lines || []).forEach(function (l) { if (l.id === p.lineId) lab = l.label; });
     var tn = p.traitName || '사진';
-    return safeName(saveNameOf(g.projName)) + '_' + safeName(lab) + '_' + (p.indiv || 1) + '_' + safeName(tn) + '_' + ymd(p.createdAt) + '.jpg';
+    return safeName(saveNameOf(g.projName)) + '_' + safeName(lab) + '_' + (p.indiv || 1) + '_' + safeName(tn) + '_' + fullDateOf(p.date, p.createdAt) + '.jpg';
   }
   function dataURLtoBytes(u) { var i = u.indexOf(','), b = atob(u.slice(i + 1)), a = new Uint8Array(b.length); for (var j = 0; j < b.length; j++) a[j] = b.charCodeAt(j); return a; }
   function downloadBlob(blob, filename) {
@@ -3676,7 +3677,7 @@
       toast(fl.length + '장 저장 중…');
       var seq = Promise.resolve();
       Array.prototype.slice.call(fl).forEach(function (f, i) {
-        seq = seq.then(function () { return preparePhoto(f); }).then(function (url) { return photoPut({ id: 'ph' + Date.now() + '_' + i, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: t ? t.id : null, traitName: tn, orig: url, anno: null, createdAt: Date.now() }); });
+        seq = seq.then(function () { return preparePhoto(f); }).then(function (url) { return photoPut({ id: 'ph' + Date.now() + '_' + i, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: t ? t.id : null, traitName: tn, orig: url, anno: null, date: S.date, createdAt: Date.now() }); });
       });
       seq.then(function () { return photosForLine(g.id, l.id); }).then(function (ps2) { S.photos = ps2; renderPhoto(); toast(fl.length + '장 저장됨'); }).catch(function () { toast('사진 처리 실패'); });
     }
@@ -4123,7 +4124,7 @@
         all.forEach(function (r) {
           if (r.genId !== it.g.id || typeof r.value !== 'string' || r.value.indexOf('data:image') !== 0) return;
           var t = traitOfGen(it.g, r.traitId), l = lineById[r.lineId] || {};
-          push(safeName(it.g.projName) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + ymd(r.updatedAt) + '.jpg', r.value, r.updatedAt);
+          push(safeName(saveNameOf(it.g.projName)) + '_' + safeName(l.label || r.lineId) + '_' + r.indiv + '_' + safeName(t ? t.name : r.traitId) + '_' + fullDateOf(r.date, r.updatedAt) + '.jpg', r.value, r.updatedAt);
         });
       });
       return out;
@@ -5114,6 +5115,9 @@
         var ph = s.photos[qi], parts = ph.name.replace(/\.[^.]+$/, '').split('_');
         if (parts.length < 4) continue;
         var pTrait = parts[parts.length - 2], pIndiv = +parts[parts.length - 3] || 1, pLabel = parts[parts.length - 4];
+        var pdm = String(parts[parts.length - 1] || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+        var pTs = pdm ? new Date(+pdm[1], +pdm[2] - 1, +pdm[3], 12, 0).getTime() : Date.now();
+        var pDate = pdm ? ((+pdm[2]) + '/' + (+pdm[3])) : '';
         var ref2 = null;
         Object.keys(lineKeyToId).forEach(function (k) { if (!ref2 && k.split('|')[1] === pLabel) ref2 = lineKeyToId[k]; });
         if (!ref2) continue;
@@ -5123,7 +5127,7 @@
           for (var o = 0; o < ph.data.length; o += chunk) strs.push(String.fromCharCode.apply(null, ph.data.subarray(o, o + chunk)));
           b64 = btoa(strs.join(''));
         } catch (e) { continue; }
-        await photoPut({ id: 'IMP' + base + '_' + pi + '_' + qi, genId: ref2.gid, lineId: ref2.id, indiv: pIndiv, traitName: pTrait, orig: 'data:image/jpeg;base64,' + b64, createdAt: Date.now() });
+        await photoPut({ id: 'IMP' + base + '_' + pi + '_' + qi, genId: ref2.gid, lineId: ref2.id, indiv: pIndiv, traitName: pTrait, orig: 'data:image/jpeg;base64,' + b64, date: pDate, createdAt: pTs });
         madePhoto++;
       }
 
