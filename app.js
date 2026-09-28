@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.9.16';
+  var APP_VERSION = '26.9.28';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -2366,7 +2366,10 @@
       renderAvg(t);
     } else if (t.type === 'rating' || t.type === 'categorical') {
       var opts = t.type === 'rating' ? t.scale : t.options;
-      var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:2px';
+      // 등급·항목형 칸은 화면 오른쪽에 모아 둔다 — 한 손으로 들고 엄지로 누르기 쉽게.
+      // (칸이 많아 넘치면 왼쪽으로 밀려 나므로 잘리지 않는다)
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:2px;width:72%;margin-left:auto';
       opts.forEach(function (o) {
         var on = String(v) === String(o);
         var b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px' + (on ? ';background:#639922;border-color:#3B6D11;color:#fff' : '');
