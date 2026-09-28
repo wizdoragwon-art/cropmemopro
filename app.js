@@ -234,7 +234,9 @@
   function folderById(id) { var fs = folders(); for (var i = 0; i < fs.length; i++) if (fs[i].id === id) return fs[i]; return null; }
   function cleanFolders() {
     var keys = projects().map(function (p) { return p.id; });
-    S.folders = folders().filter(function (f) { f.ids = f.ids.filter(function (k) { return keys.indexOf(k) >= 0; }); return f.ids.length > 0; });
+    // 직접 만든 빈 폴더(manual)는 과제를 넣기 전이라도 남겨 둔다.
+    // 과제를 끌어서 묶어 만든 폴더는 예전처럼 비면 저절로 없어진다.
+    S.folders = folders().filter(function (f) { f.ids = f.ids.filter(function (k) { return keys.indexOf(k) >= 0; }); return f.ids.length > 0 || f.manual; });
   }
   function makeFolder(aKey, bKey) {
     var f = { id: 'F' + Date.now(), name: '새 폴더', ids: [aKey, bKey].filter(Boolean) };
@@ -242,6 +244,26 @@
     folders().push(f); cleanFolders();
     (S.folderOpen = S.folderOpen || {})[f.id] = true;      // 방금 만든 폴더는 펼쳐서 보여준다
     saveFolders().then(function () { renderHome(); renameFolderPopup(f.id, true); });
+  }
+  // 홈 '새 폴더' — 비어 있는 폴더를 먼저 만들고, 과제를 끌어다 넣는다
+  function newFolderPopup() {
+    var n = folders().length + 1, name = '새 폴더 ' + n;
+    openOverlay(
+      '<div class="ovl-title">새 폴더 만들기</div>' +
+      '<div class="ovl-msg">과제를 묶어 둘 폴더 이름을 입력하세요.<br>만든 뒤 과제를 <b>꾹 눌러 폴더 위로 끌어다 놓으면</b> 폴더에 들어갑니다.<br><span style="color:var(--text-muted)">폴더 이름은 백업·내보내기 파일의 맨 앞에도 붙습니다.</span></div>' +
+      '<input class="ein" id="fdNewName" style="margin-top:12px;font-size:15px" value="' + esc(name) + '">' +
+      '<div class="ovl-btns"><button class="btn" id="fdNewCancel">취소</button><button class="btn primary" id="fdNewOk">만들기</button></div>'
+    );
+    var inp = $('fdNewName'); try { inp.focus(); inp.select(); } catch (e) {}
+    $('fdNewCancel').onclick = closeOverlay;
+    $('fdNewOk').onclick = function () {
+      var nm = (inp.value || '').trim() || name;
+      var f = { id: 'F' + Date.now(), name: nm, ids: [], manual: 1 };
+      folders().push(f);
+      (S.folderOpen = S.folderOpen || {})[f.id] = true;
+      closeOverlay();
+      saveFolders().then(function () { renderHome(); toast('폴더 만듦 · 과제를 꾹 눌러 끌어다 넣으세요'); });
+    };
   }
   function addToFolder(fid, projKey) {
     var f = folderById(fid); if (!f) return;
@@ -1948,7 +1970,7 @@
     S.folderOpen = S.folderOpen || {};
     folders().forEach(function (f) {
       var ps = f.ids.map(function (k) { return byId[k]; }).filter(Boolean);
-      if (!ps.length) return;
+      if (!ps.length && !f.manual) return;                  // 끌어서 만든 폴더는 비면 표시하지 않는다
       ps.forEach(function (p) { used[p.id] = 1; });
       var open = S.folderOpen[f.id] === true;   // 기본은 접힘 · 앱 사용 중 사용자가 연 폴더만 열린 상태 유지
       html += '<div class="hfolder" data-f="' + esc(f.id) + '" style="border:0.5px dashed var(--border-strong);border-radius:12px;padding:8px 8px 2px;margin-bottom:10px;background:var(--surface-1)">' +
@@ -1957,7 +1979,8 @@
           '<div style="flex:1;min-width:0;font-size:13px;font-weight:600">' + ico('folder', '#639922', 14) + ' ' + esc(f.name) + ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">과제 ' + ps.length + '</span></div>' +
           '<button class="btn hfoldedit" data-f="' + esc(f.id) + '" style="width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center">' + ico('pencil', 'var(--text-secondary)', 15) + '</button>' +
         '</div>' +
-        (open ? ps.map(function (p) { return projRowHTML(p, true); }).join('') : '') +
+        (open ? (ps.length ? ps.map(function (p) { return projRowHTML(p, true); }).join('')
+                           : '<div style="font-size:11px;color:var(--text-muted);text-align:center;padding:10px 6px 12px;line-height:1.6">아직 비어 있습니다<br>아래 과제를 <b>꾹 눌러</b> 이 폴더 위로 끌어다 놓으세요</div>') : '') +
       '</div>';
     });
     all.forEach(function (p) { if (!used[p.id]) html += projRowHTML(p, false); });
@@ -2007,6 +2030,7 @@
       '</div>' +
       '<div style="margin:16px 14px 0"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:13px;font-weight:600">과제 · 세대</span>' +
           '<div style="display:flex;gap:6px">' +
+            '<button class="btn" id="hFolder" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('folder-plus', 'var(--text-primary)', 14) + ' 새 폴더</button>' +
             '<button class="btn" id="hNew" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 14) + ' 새 과제</button>' +
             '<button class="btn" id="hLoad" style="padding:5px 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('database-import', 'var(--text-primary)', 14) + ' 불러오기</button>' +
           '</div></div>' +
@@ -2018,6 +2042,7 @@
     $('bkCard').onclick = function () { startBackup(); };
     $('hGear').onclick = function () { go('settings'); };
     $('hResume').onclick = function () { go('collect'); };
+    $('hFolder').onclick = function () { newFolderPopup(); };
     $('hNew').onclick = function () { startNew(); };
     $('hLoad').onclick = function () { importPopup(); };
     document.querySelectorAll('.hprojopen').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) selectGen(p.items[0].idx); }; });
@@ -4544,8 +4569,8 @@
         note: '설치 직후에는 둘러보기용 예시 과제가 하나 들어 있습니다. 필요 없으면 지우고 새로 만드세요.' },
 
       { img: '01-home', chap: '과제 만들기', title: '새 과제 만들기 · 불러오기',
-        body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽에서 <b>+ 새 과제</b>로 새로 만들고, <b>불러오기</b>로 기기에 백업해 둔 과제를 되살립니다.',
-        note: '불러오기는 백업 ZIP · 과제/모음 폴더 · CSV · Excel 야장(.xlsx)을 받습니다. 생성된 과제들은 드래그를 하여 모음 폴더로 병합이 가능합니다.',
+        body: '홈 아래 <b>과제 · 세대</b> 목록 오른쪽에서 <b>+ 새 과제</b>로 새로 만들고, <b>불러오기</b>로 기기에 백업해 둔 과제를 되살립니다. 왼쪽 <b>새 폴더</b>로 빈 모음 폴더를 먼저 만들어 둘 수도 있습니다.',
+        note: '불러오기는 백업 ZIP · 과제/모음 폴더 · CSV · Excel 야장(.xlsx)을 받습니다. 과제는 꾹 눌러 다른 과제나 폴더 위로 끌어다 놓으면 모음 폴더로 묶입니다.',
         calls: [gc('hNew', 1, 'left'), gc('hLoad', 2, 'right')] },
 
       { img: '03-wizard1', chap: '과제 생성 3단계 · 1 / 3', title: '① 과제 정보',
