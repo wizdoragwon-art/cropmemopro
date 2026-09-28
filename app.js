@@ -306,7 +306,7 @@
     var rec = { k: k, genId: g.id, lineId: l.id, indiv: S.indiv, traitId: tid, date: S.date, ser: true, value: value, updatedAt: Date.now(), dirty: 1 };
     await obsPut(rec);
     S.lastSaved = Date.now();
-    updatePending();
+    bumpPending(rec);            // 조사기록 전체를 다시 읽지 않고 숫자만 올린다 (느려짐·발열 방지)
   }
 
   // 예전 버전은 과장·과중처럼 '한 번만 재는' 형질을 조사일과 무관한 값 하나로 저장했다.
@@ -339,14 +339,41 @@
     var all = await obsAll(), g = curGen();
     all.forEach(function (r) { if (r.genId === g.id) S.vals[r.k] = r.value; });
   }
-  async function updatePending() {
-    var all = await obsAll();
-    S.pending = all.filter(function (r) { return r.dirty; }).length;
-    var lb = S.lastBackup || 0;                              // 마지막 백업 이후 저장한 건수
-    S.bkPending = all.filter(function (r) { return (r.updatedAt || 0) > lb; }).length;
-    refreshProjDates(all);                                   // 과제별 마지막 조사일
+  /* 미동기화·백업대기 건수
+   *   예전에는 값을 하나 저장할 때마다 obsAll() 로 조사기록 '전체'(다른 과제·지난 조사일 포함)를
+   *   커서로 훑어 세었다. 기록이 쌓이면 칸 하나 누를 때마다 수십만 건을 읽어 휴대폰이 느려지고
+   *   발열이 생겼다. 그래서 전체 집계는 앱을 켤 때·동기화·백업·불러오기처럼 드문 일에만 하고,
+   *   조사 중에는 방금 저장한 기록 하나만 숫자에 더한다.
+   */
+  function pendBadge() {
     var b = document.querySelector('[data-pending]'); if (b) b.textContent = S.pending;
     var sc = $('syncStat'); if (sc) renderSyncStat(sc);
+  }
+  async function updatePending() {                           // 전체 재집계 (느림 · 드물게만)
+    var all = await obsAll();
+    var lb = S.lastBackup || 0, ds = {}, bs = {}, pn = 0, bn = 0;
+    all.forEach(function (r) {
+      if (r.dirty) { ds[r.k] = 1; pn++; }
+      if ((r.updatedAt || 0) > lb) { bs[r.k] = 1; bn++; }    // 마지막 백업 이후 저장한 건수
+    });
+    S.dirtySet = ds; S.bkSet = bs; S.pending = pn; S.bkPending = bn;
+    refreshProjDates(all);                                   // 과제별 마지막 조사일
+    pendBadge();
+  }
+  // 값 하나를 저장했을 때 — 전체를 다시 읽지 않고 숫자만 올린다
+  function bumpPending(rec) {
+    if (!S.dirtySet || !S.bkSet) { updatePending(); return; }  // 아직 집계 전이면 한 번만 전체
+    if (!S.dirtySet[rec.k]) { S.dirtySet[rec.k] = 1; S.pending++; }
+    if (!S.bkSet[rec.k]) { S.bkSet[rec.k] = 1; S.bkPending++; }
+    touchProjDate(rec);
+    pendBadge();
+  }
+  // 방금 저장한 기록으로 '그 과제의 마지막 조사일' 만 갱신한다 (홈 카드·파일 이름용)
+  function touchProjDate(rec) {
+    var g = curGen(); if (!g || g.id !== rec.genId) return;
+    var k = projKeyOf(g); if (!k) return;
+    if (!S.projDates) S.projDates = {};
+    S.projDates[k] = { has: true, label: rec.date || mdOf(rec.updatedAt), ymd: fullDateOf(rec.date, rec.updatedAt) };
   }
 
   // ---------- sync (Google Apps Script) ----------
@@ -1154,7 +1181,7 @@
           var sk = writer.skipped();
           toast((flat ? '선택한 폴더에 파일 ' : '백업 완료 · 과제 ' + b.projects + '개 · 파일 ') + writer.written() + (flat ? '개 저장됨' : '개') + (sk ? ' · 같은 사진 ' + sk + '장 건너뜀' : ''));
           S.lastBackup = Date.now();
-          S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+          S.bkPending = 0; S.bkSet = {}; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
           return;
         }
         // 폴더에 쓰다가 막혔다 — 기억을 지우고 ZIP으로 넘어간다
@@ -1169,7 +1196,7 @@
         toast(gone ? '저장 폴더가 없어져 ZIP으로 저장했습니다 · 다시 누르면 폴더를 고를 수 있습니다'
                    : '폴더 저장이 막혀 ZIP으로 저장했습니다 · 파일 ' + b.files.length + '개');
         S.lastBackup = Date.now();
-        S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+        S.bkPending = 0; S.bkSet = {}; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
         return;
       }
       // ── ZIP 저장 ──
@@ -1184,7 +1211,7 @@
       closeOverlay();
       toast('다운로드 폴더에 저장됨 · 과제 ' + b.projects + '개 · 파일 ' + b.files.length + '개');
       S.lastBackup = Date.now();
-      S.bkPending = 0; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
+      S.bkPending = 0; S.bkSet = {}; kvSet('lastBackup', S.lastBackup).then(function () { if (S.view === 'home') renderHome(); });
     } catch (e) {
       closeOverlay();
       var m = (e && e.name === 'QuotaExceededError') ? '기기 저장 공간이 부족합니다'
@@ -2072,7 +2099,9 @@
   }
   function refreshCollect() {
     if (S.view !== 'collect' || S.traitEdit) return;
-    renderCard(); renderInput(); renderHist(); renderMap();
+    renderCard(); renderInput(); renderHist();
+    // 필드맵은 계통이 바뀔 때만 통째로 다시 그린다. 개체만 옮겼으면 칸 색만 고치면 된다.
+    if (S._mapLine !== curLine().id) renderMap(); else paintIndivCur();
     var n = $('cNum'); if (n) n.textContent = '개체 ' + S.indiv + '/' + total();
   }
   function renderGenBar() {
@@ -2358,7 +2387,7 @@
           else if (kk === '.') { if (cur.indexOf('.') < 0 && cur !== '') cur += '.'; }
           else cur += kk;
           if (t.type === 'ratio' && parseFloat(cur) > 100) cur = '100';
-          setVal(t.id, cur).then(function () { renderInput(); renderPills(); renderHist(); renderMap(); });
+          setVal(t.id, cur).then(function () { renderInput(); renderPills(); renderHist(); });
         };
         pad.appendChild(b);
       });
@@ -2374,7 +2403,7 @@
         var on = String(v) === String(o);
         var b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px' + (on ? ';background:#639922;border-color:#3B6D11;color:#fff' : '');
         b.textContent = o;
-        b.onclick = function () { var cur = getValFor(t.id); var nv = (String(cur) === String(o)) ? '' : String(o); setVal(t.id, nv).then(function () { renderInput(); renderPills(); renderHist(); renderMap(); }); };
+        b.onclick = function () { var cur = getValFor(t.id); var nv = (String(cur) === String(o)) ? '' : String(o); setVal(t.id, nv).then(function () { renderInput(); renderPills(); renderHist(); }); };
         wrap.appendChild(b);
       });
       // 목록에 없는 값이 이미 들어 있으면 그 값도 칸으로 보여 준다 (예전 항목명·불러온 자료)
@@ -2383,7 +2412,7 @@
         var ob = document.createElement('button'); ob.className = 'btn';
         ob.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px;background:#B0721A;border-color:#8A5A14;color:#fff';
         ob.textContent = vv;
-        ob.onclick = function () { setVal(t.id, '').then(function () { renderInput(); renderPills(); renderHist(); renderMap(); }); };
+        ob.onclick = function () { setVal(t.id, '').then(function () { renderInput(); renderPills(); renderHist(); }); };
         wrap.appendChild(ob);
         var w2 = document.createElement('div');
         w2.style.cssText = 'font-size:11px;color:#B0721A;margin-top:8px;line-height:1.6';
@@ -2406,8 +2435,12 @@
         $('txText').onclick = function () { setVal(t.id, '').then(function () { renderInput(); renderPills(); renderHist(); }); };
       } else {
         var ta = document.createElement('textarea'); ta.className = 'ein'; ta.style.height = '84px'; ta.style.padding = '10px 12px'; ta.style.resize = 'none'; if (v) ta.value = v;
-        ta.oninput = function () { setVal(t.id, ta.value); };
-        ta.onblur = function () { renderPills(); };
+        // 글자를 칠 때마다 저장하면 쓰기가 너무 잦다 — 잠깐 멈추면 저장하고, 칸을 벗어날 때 한 번 더 저장한다
+        ta.oninput = function () {
+          S.vals[valKey(curLine().id, S.indiv, t.id)] = ta.value;   // 화면·집계용 값은 즉시 반영
+          clearTimeout(S._taT); S._taT = setTimeout(function () { setVal(t.id, ta.value); }, 350);
+        };
+        ta.onblur = function () { clearTimeout(S._taT); setVal(t.id, ta.value).then(renderPills); };
         area.appendChild(ta);
         var db = document.createElement('button'); db.className = 'btn'; db.style.cssText = 'width:100%;height:44px;font-size:13px;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:6px';
         db.innerHTML = ico('pencil', 'var(--text-primary)', 16) + ' 손글씨 · 그리기';
@@ -2718,6 +2751,10 @@
       '</div>';
     $('mFilter').onclick = function () { S.showSelOnly = !S.showSelOnly; renderMap(); };
     var cols = 10, cell = Math.max(24, Math.floor((wrap.clientWidth - 24 - 4 * 9) / 10));
+    S._mapLine = l.id;
+    // 개체 선발이 있는 계통을 한 번에 모아 둔다 (계통마다 선발목록 전체를 훑으면 계통수 × 선발수 만큼 늘어난다)
+    var selLines = {};
+    for (var sk in S.indivSel) { if (S.indivSel[sk]) selLines[sk.slice(0, sk.lastIndexOf(':'))] = 1; }
 
     // individual map
     var gi = $('mIndiv'); gi.style.gridTemplateColumns = 'repeat(' + Math.min(cols, total()) + ',' + cell + 'px)';
@@ -2725,6 +2762,7 @@
     for (var iv = 1; iv <= total(); iv++) (function (iv) {
       if (S.showSelOnly && !S.indivSel[l.id + ':' + iv]) return;
       var b = document.createElement('button'); b.className = 'mm'; b.style.width = cell + 'px'; b.style.height = cell + 'px';
+      b.setAttribute('data-iv', iv);
       if (iv === S.indiv) { b.style.background = '#639922'; b.style.color = '#fff'; b.style.borderColor = '#3B6D11'; }
       else if (indivEntered(l.id, iv)) { b.style.background = '#F1F6E8'; }
       b.textContent = iv;
@@ -2742,8 +2780,8 @@
     var lineEntered = {};
     var lsh = 0, lselN = 0, lselI = 0;
     g.lines.forEach(function (ln, i) {
-      if (ln.selected) lselN++; else if (lineHasIndivSel(ln.id)) lselI++;
-      if (S.showSelOnly && !ln.selected && !lineHasIndivSel(ln.id)) return;
+      if (ln.selected) lselN++; else if (selLines[ln.id]) lselI++;
+      if (S.showSelOnly && !ln.selected && !selLines[ln.id]) return;
       var b = document.createElement('button'); b.className = 'mm'; b.style.width = cell + 'px'; b.style.height = cell + 'px';
       var isCur = i === S.lineIdx;
       if (isCur) { b.style.background = '#639922'; b.style.color = '#fff'; b.style.borderColor = '#3B6D11'; }
@@ -2752,13 +2790,27 @@
         b.innerHTML = '<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(cell * 0.98) + 'px;color:' + (isCur ? '#E0B94F' : '#EBCB78') + ';pointer-events:none">★</span><span style="position:relative;z-index:1;font-weight:600">' + (i + 1) + '</span>';
       } else {
         b.textContent = (i + 1);
-        if (lineHasIndivSel(ln.id)) { var stq = document.createElement('span'); stq.textContent = '★'; stq.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (isCur ? '#fff' : '#C08A2B'); b.appendChild(stq); }
+        if (selLines[ln.id]) { var stq = document.createElement('span'); stq.textContent = '★'; stq.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (isCur ? '#fff' : '#C08A2B'); b.appendChild(stq); }
       }
       b.onclick = function () { S.lineIdx = i; S.indiv = 1; renderCollect(); };
       gl2.appendChild(b); lsh++;
     });
     if (S.showSelOnly && lsh === 0) gl2.innerHTML = '<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);text-align:center;padding:6px 0">선발된 항목이 없습니다</div>';
     $('mLfoot').textContent = S.showSelOnly ? ('계통선발 ' + lselN + ' · 개체선발 있는 계통 ' + lselI) : ('총 ' + g.lines.length + ' 계통 · 선발 ' + lselN);
+  }
+  // 개체만 옮겼을 때 — 필드맵을 다시 만들지 않고 개체 칸 색만 고친다
+  function paintIndivCur() {
+    var gi = $('mIndiv'); if (!gi) { renderMap(); return; }
+    var l = curLine();
+    for (var i = 0; i < gi.children.length; i++) {
+      var b = gi.children[i], iv = +b.getAttribute('data-iv'); if (!iv) continue;
+      var cur = iv === S.indiv;
+      b.style.background = cur ? '#639922' : (indivEntered(l.id, iv) ? '#F1F6E8' : '');
+      b.style.color = cur ? '#fff' : '';
+      b.style.borderColor = cur ? '#3B6D11' : '';
+      var st = b.querySelector('span'); if (st) st.style.color = cur ? '#fff' : '#C08A2B';
+    }
+    var ih = $('mIhint'); if (ih) ih.textContent = '현재 ' + S.indiv + '/' + total();
   }
   function indivEntered(lineId, iv) { var g = curGen(); for (var i = 0; i < g.traits.length; i++) { var t = g.traits[i]; var k = g.id + ':' + lineId + ':' + iv + ':' + t.id + ('@' + S.date); if (S.vals[k] != null && S.vals[k] !== '') return true; } return false; }
 
