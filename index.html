@@ -62,12 +62,32 @@
   // (앱을 업데이트해도 예전 캐시가 남아 옛 화면이 뜨는 문제를 막기 위해 등록하지 않음)
   if (!window.CM_NATIVE && 'serviceWorker' in navigator) {
     window.addEventListener('load', function () {
+      var REG = null, last = 0;
+      // 새 버전 확인 — 앱을 열 때와, 다른 앱에 갔다 돌아올 때만 한다.
+      //   (인터넷이 다시 연결될 때·앱을 계속 켜 둘 때는 확인하지 않는다 — 사용자 요청)
+      // 돌아올 때 visibilitychange 와 focus 가 거의 동시에 울리므로 3초 안의 중복만 걸러낸다.
+      // (확인은 sw.js 한 개만 받아 보는 가벼운 일이라 자료 요금에 거의 영향이 없다)
+      function check(force) {
+        if (!REG || !navigator.onLine) return;
+        var now = Date.now();
+        if (!force && now - last < 3000) return;
+        last = now;
+        try { REG.update(); } catch (e) {}
+      }
       navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
-        .then(function (reg) { try { reg.update(); } catch (e) {} })
+        .then(function (reg) { REG = reg; check(true); })      // 앱을 열 때
         .catch(function (e) { console.warn('SW 등록 실패', e); });
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+      window.addEventListener('focus', function () { check(); });
+      // 새 버전이 자리를 잡으면 화면을 한 번만 다시 불러온다.
+      // 글을 쓰는 중이면 그 칸을 벗어날 때까지 기다린다 (조사값은 이미 저장돼 있어 사라지지 않는다).
       var reloaded = false;
       navigator.serviceWorker.addEventListener('controllerchange', function () {
-        if (reloaded) return; reloaded = true; location.reload();
+        if (reloaded) return; reloaded = true;
+        var go = function () { location.reload(); };
+        var el = document.activeElement;
+        if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) el.addEventListener('blur', function () { setTimeout(go, 150); }, { once: true });
+        else go();
       });
     });
   }
