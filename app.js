@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.10.20 14:08';
+  var APP_VERSION = '26.10.20 14:17';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -1743,6 +1743,61 @@
       closeOverlay(); renderGenEdit();
     };
   }
+  /* 형질세트는 과제 하나에 하나 — 세대마다 따로 두지 않는다. (2026-10-20)
+   *   기준 세대(보통 과제 수정에서 편집한 세대)의 형질을 과제의 모든 세대에 똑같이 맞춘다.
+   *   · 다른 세대에만 있던 형질은 버리지 않고 **뒤에 덧붙여** 합친다 — 적어 둔 값이 사라지면 안 된다.
+   *   · 세대마다 형질 id 가 달랐더라도 **이름으로 짝을 맞춰** 조사값의 형질 id 를 새 id 로 옮긴다.
+   *   바뀐 조사값 건수를 돌려준다.
+   */
+  function unifyProjectTraits(pk, master) {
+    var items = [];
+    S.gens.forEach(function (x) { if (projKeyOf(x) === pk) items.push(x); });
+    if (items.length < 2 || !master) return Promise.resolve(0);
+
+    // 1) 합친 형질 목록 — 기준 세대 먼저, 다른 세대에만 있던 이름은 뒤에 붙인다
+    var merged = JSON.parse(JSON.stringify(master.traits || []));
+    var byName = {}; merged.forEach(function (t) { byName[t.name] = t; });
+    items.forEach(function (gg) {
+      if (gg.id === master.id) return;
+      (gg.traits || []).forEach(function (t) {
+        if (byName[t.name]) return;
+        var c = JSON.parse(JSON.stringify(t));
+        c.id = 'T' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        merged.push(c); byName[c.name] = c;
+      });
+    });
+
+    // 2) 세대마다 옛 형질 id → 합친 목록의 id 짝을 만든다
+    var moves = [];
+    items.forEach(function (gg) {
+      var map = {}, changed = false;
+      (gg.traits || []).forEach(function (t) {
+        var hit = byName[t.name];
+        if (hit && hit.id !== t.id) { map[t.id] = hit.id; changed = true; }
+      });
+      if (changed) moves.push({ genId: gg.id, map: map });
+      gg.traits = JSON.parse(JSON.stringify(merged));
+    });
+    if (!moves.length) return Promise.resolve(0);
+
+    // 3) 조사값의 형질 id 를 바꿔 다시 쓴다
+    var byGen = {}; moves.forEach(function (m) { byGen[m.genId] = m.map; });
+    return obsAll().then(function (all) {
+      return new Promise(function (res) {
+        var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs'), n = 0;
+        all.forEach(function (r) {
+          var map = byGen[r.genId]; if (!map) return;
+          var nid = map[r.traitId]; if (!nid) return;
+          st.delete(r.k);
+          r.traitId = nid;
+          r.k = r.genId + ':' + r.lineId + ':' + r.indiv + ':' + r.traitId + (r.date ? ('@' + r.date) : '');
+          r.dirty = 1; r.updatedAt = Date.now();
+          st.put(r); n++;
+        });
+        tx.oncomplete = function () { res(n); }; tx.onerror = function () { res(n); };
+      });
+    }).then(function (n) { return loadVals().then(function () { return n; }); });
+  }
   // 형질 묶음을 태그 모양으로 (세대 하나 분)
   function traitTagsOf(gg) {
     return (gg.traits || []).map(function (t) {
@@ -1789,13 +1844,6 @@
           return '<button class="pill gegen' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
         }).join('') + '</div></div>'
       : '';
-    // '전체' 일 때 형질 묶음은 세대마다 한 줄씩
-    var traitAllHTML = proj.items.map(function (it) {
-      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:9px 2px;border-top:0.5px solid var(--border)">' +
-        '<span style="flex:0 0 auto;font-size:11px;font-weight:600;color:#27500A;background:#EAF3DE;border-radius:9px;padding:3px 8px;margin-top:2px">' + esc(it.g.label) + '</span>' +
-        '<div style="flex:1;min-width:0">' + (traitTagsOf(it.g) || '<span style="font-size:12px;color:var(--text-muted)">형질이 없습니다</span>') + '</div>' +
-        '<button class="btn geTraitOne" data-i="' + it.idx + '" style="flex:0 0 auto;height:30px;padding:0 10px;font-size:11.5px">편집</button></div>';
-    }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + (viewIdx == null ? '세대 ' + proj.items.length + '개 · 계통 ' + projLineN + '개를 한 번에' : esc(g.label) + ' 세대만 보기 · 계통 ' + nAll + '개') + '</div></div></div>' +
       '<div style="flex:1;padding:16px 14px;overflow:auto">' +
@@ -1819,13 +1867,10 @@
           '<button class="btn" id="geDateClr" style="height:28px;padding:0 10px;font-size:11px;color:var(--text-secondary);flex:0 0 auto">날짜 지우기</button>' +
         '</div>' +
         genPick +
-        // traits
-        (viewIdx == null && proj.items.length > 1
-          ? '<div style="margin-top:16px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <span style="color:var(--text-muted);font-weight:400">· 세대마다</span></span></div>' +
-            '<div style="max-height:220px;overflow:auto;border:0.5px solid var(--border);border-radius:10px;padding:2px 9px 6px">' + traitAllHTML + '</div>'
-          : '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개 <span style="color:var(--text-muted);font-weight:400">· ' + esc(g.label) + '</span></span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
-            '<div style="max-height:132px;overflow:auto;border:0.5px solid var(--border);border-radius:10px;padding:9px 9px 3px">' + (traitTags || '<span style="font-size:12px;color:var(--text-muted)">형질이 없습니다</span>') + '</div>' +
-            (proj.items.length > 1 ? '<button class="btn" id="geTraitAll" style="width:100%;height:38px;font-size:12px;margin-top:8px;color:var(--text-secondary)">이 형질세트를 과제의 모든 세대에 적용</button>' : '')) +
+        // traits — 형질세트는 과제 하나에 하나, 모든 세대가 같이 쓴다
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개' + (proj.items.length > 1 ? ' <span style="color:var(--text-muted);font-weight:400">· 모든 세대 공통</span>' : '') + '</span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
+        '<div style="max-height:132px;overflow:auto;border:0.5px solid var(--border);border-radius:10px;padding:9px 9px 3px">' + (traitTags || '<span style="font-size:12px;color:var(--text-muted)">형질이 없습니다</span>') + '</div>' +
+        (proj.items.length > 1 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">형질을 고치면 과제의 <b>세대 ' + proj.items.length + '개 모두</b>에 똑같이 적용됩니다. 적어 둔 조사값은 형질 이름을 따라 그대로 남습니다.</div>' : '') +
         // lines table
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px;gap:6px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500;flex:1;min-width:0">등록 조합·계통 <b style="color:var(--text-primary)">' + nAll + '</b>' + (proj.items.length > 1 ? ' <span style="color:var(--text-muted);font-weight:400">· ' + (viewIdx == null ? '세대 ' + proj.items.length + '개 모아 보기' : esc(g.label) + '만 보기') + '</span>' : '') + '</span>' +
           '<button class="btn" id="geAddGen" style="height:32px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px;flex:0 0 auto">' + ico('plus', 'var(--text-primary)', 13) + ' 세대</button>' +
@@ -1857,7 +1902,7 @@
     $('geCropAdd').onclick = function () { geCropPopup(); };
     if ($('geDateClr')) $('geDateClr').onclick = function () { $('geSow').value = ''; $('gePlant').value = ''; S.geDirty = true; };
     $('geBack').onclick = function () { askSaveGenEdit(); };
-    if ($('geTrait')) $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
+    $('geTrait').onclick = function () { collect(); kvSet('gens', S.gens).then(function () { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var gg = curGen(); S.date = gg.surveyDates[gg.surveyDates.length - 1]; S.trait = gg.traits[0] ? gg.traits[0].id : null; S.traitEdit = true; S.traitEditFrom = 'genedit'; loadVals().then(function () { go('collect'); }); }); };
     $('geBulk').onclick = function () { collect(); S.bulkIdx = (viewIdx == null ? i : viewIdx); S.bulkStage = 'idle'; S.bulkRows = null; S.bulkFileName = ''; go('bulk'); };
     $('geDel').onclick = function () { deleteProject(projKeyOf(g)); };
     if ($('geDelGen')) $('geDelGen').onclick = function () { collect(); deleteGen(i); };
@@ -1870,26 +1915,7 @@
         renderGenEdit();
       });
     }; });
-    // 전체 보기에서 세대별 '편집' — 그 세대의 형질세트로 들어간다
-    v.querySelectorAll('.geTraitOne').forEach(function (b) { b.onclick = function () {
-      collect();
-      var idx = +b.getAttribute('data-i');
-      kvSet('gens', S.gens).then(function () {
-        S.editIdx = idx; S.genIdx = idx; S.lineIdx = 0; S.indiv = 1;
-        var gg = curGen();
-        S.date = gg.surveyDates[gg.surveyDates.length - 1];
-        S.trait = gg.traits[0] ? gg.traits[0].id : null;
-        S.traitEdit = true; S.traitEditFrom = 'genedit';
-        go('collect');
-      });
-    }; });
     $('geAddGen').onclick = function () { addGenPopup(projKeyOf(g), i); };
-    if ($('geTraitAll')) $('geTraitAll').onclick = async function () {
-      if (!(await askConfirm('현재 형질세트를 이 과제의 모든 세대에 적용할까요?\n각 세대의 기존 형질 구성은 대체됩니다(입력값은 유지).', { title: '형질세트 적용' }))) return;
-      var pj = projectOf(projKeyOf(g));
-      pj.items.forEach(function (it) { if (it.g.id !== g.id) it.g.traits = JSON.parse(JSON.stringify(g.traits)); });
-      kvSet('gens', S.gens).then(function () { toast('모든 세대에 적용됨'); });
-    };
     $('geLadd').onclick = function () { collect(); var tg = S.gens[viewIdx == null ? i : viewIdx] || g; var n = tg.lines.length + 1; tg.lines.push({ id: 'L' + Date.now() + '_' + n, label: (tg.prefix || yy()) + '-' + String(n).padStart(4, '0'), pedigree: '', gen: tg.label, rep: 1, block: 'B-1', zone: (tg.lines[0] && tg.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (tg.lines[0] ? tg.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
     v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () {
       var gi = +b.getAttribute('data-g'), li = +b.getAttribute('data-i');
@@ -1924,7 +1950,9 @@
       var zn = $('geZone').value.trim();
       if (zn) S.gens.forEach(function (x) { if (projKeyOf(x) === pk) x.lines.forEach(function (l) { l.zone = zn; }); });
       S.geDirty = false;
-      regroupProjectGens(pk).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대 ' + moved + '건 옮김' : '저장됨'); go('home'); }); });
+      unifyProjectTraits(pk, g)                       // 형질세트는 과제 하나에 하나
+        .then(function () { return regroupProjectGens(pk); })
+        .then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대 ' + moved + '건 옮김' : '저장됨'); go('home'); }); });
     };
     $('geSave').onclick = function () { S._geSave(); };
   }
@@ -2224,7 +2252,14 @@
     $('hLoad').onclick = function () { importPopup(); };
     document.querySelectorAll('.hprojopen').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) selectGen(p.items[0].idx); }; });
     document.querySelectorAll('.hgenchip').forEach(function (b) { b.onclick = function () { selectGen(+b.getAttribute('data-i')); }; });
-    document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () { var p = projectOf(b.getAttribute('data-p')); if (p && p.items.length) { S.editIdx = p.items[0].idx; S.geView = null; go('genedit'); } }; });
+    document.querySelectorAll('.hprojedit').forEach(function (b) { b.onclick = function () {
+      var p = projectOf(b.getAttribute('data-p')); if (!p || !p.items.length) return;
+      S.editIdx = p.items[0].idx; S.geView = null;
+      // 세대마다 형질이 갈라져 있었다면 여기서 한 벌로 합친다 (값은 형질 이름을 따라 그대로 남는다)
+      unifyProjectTraits(p.id, p.items[0].g).then(function (n) {
+        return (n ? kvSet('gens', S.gens) : null);
+      }).then(function () { go('genedit'); });
+    }; });
     document.querySelectorAll('.hprojdel').forEach(function (b) { b.onclick = function () { deleteProject(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hprojcopy').forEach(function (b) { b.onclick = function () { duplicateProjectPopup(b.getAttribute('data-p')); }; });
     document.querySelectorAll('.hprojout').forEach(function (b) { b.onclick = function () { removeFromFolder(b.getAttribute('data-p')); }; });
@@ -2804,6 +2839,8 @@
         .then(function (n) { if (n) { updatePending(); toast('바뀐 이름에 맞춰 조사값 ' + n + '건도 함께 고쳤습니다'); } })
         .then(function () { return kvSet('gens', S.gens); })
         .then(function () { return loadVals(); })
+        .then(function () { return back === 'genedit' ? unifyProjectTraits(projKeyOf(g), g) : null; })
+        .then(function () { return kvSet('gens', S.gens); })
         .then(function () { if (!traitById(S.trait)) S.trait = g.traits[0] ? g.traits[0].id : null; if (back === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect(); });
     }
     $('tEBack').onclick = done; $('tEDone').onclick = done;
@@ -5722,9 +5759,11 @@
     // 2) 형질세트 편집 중이면 편집만 종료
     if (S.view === 'collect' && S.traitEdit) {
       var from = S.traitEditFrom; S.traitEdit = false; S.traitEditFrom = null;
-      kvSet('gens', S.gens).then(function () { return loadVals(); }).then(function () {
-        if (from === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
-      });
+      var cg = curGen();
+      Promise.resolve(from === 'genedit' ? unifyProjectTraits(projKeyOf(cg), cg) : null)
+        .then(function () { return kvSet('gens', S.gens); }).then(function () { return loadVals(); }).then(function () {
+          if (from === 'genedit') { S.editIdx = S.genIdx; go('genedit'); } else renderCollect();
+        });
       return 'ok';
     }
     // 3) 과제 수정 중이면 저장 여부를 묻고 홈으로
