@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.9.29 18:01';
+  var APP_VERSION = '26.10.20 12:58';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -1749,24 +1749,37 @@
       var tag = t.unit ? t.unit : (t.scale ? (typeof t.scale[0] === 'number' ? t.scale.join('·') : t.scale.join('/')) : (t.type === 'counter' ? '개수' : t.type === 'date' ? '날짜' : t.type === 'categorical' ? '항목' : t.type === 'text' ? '문자' : ''));
       return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;background:var(--surface-1);border:0.5px solid var(--border);border-radius:14px;padding:4px 10px;margin:0 6px 6px 0">' + esc(t.name) + (tag ? '<span style="font-size:10px;color:var(--text-muted)">' + esc(tag) + '</span>' : '') + '' + '</span>';
     }).join('');
-    var rows = g.lines.map(function (l, li) {
-      return '<tr style="border-top:0.5px solid var(--border)">' +
-        '<td style="padding:3px 1px;color:var(--text-muted);font-size:11px;text-align:center">' + (li + 1) + '</td>' +
-        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="label" value="' + esc(l.label) + '" style="width:100%;min-width:0;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 5px;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="pedigree" value="' + esc(l.pedigree || '') + '" placeholder="품종명/Pedigree" style="width:100%;min-width:0;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 5px;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="gen" value="' + esc(l.gen || g.label || '') + '" style="width:44px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 3px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="rep" type="number" value="' + (l.rep || '') + '" style="width:38px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 2px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 2px"><input class="geL" data-i="' + li + '" data-f="indivTotal" type="number" value="' + (l.indivTotal || '') + '" style="width:40px;height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 2px;text-align:center;background:var(--surface-2);color:var(--text-primary)"></td>' +
-        '<td style="padding:3px 0"><button class="btn geLdel" data-i="' + li + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 13) + '</button></td></tr>';
-    }).join('');
     var proj = projectOf(projKeyOf(g)) || { items: [{ g: g, idx: i }], name: g.projName };
-    var genBar = '<div style="margin-top:14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">세대 <b style="color:var(--text-primary)">' + proj.items.length + '</b>개 · 편집할 세대 선택</span><button class="btn" id="geAddGen" style="height:30px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('plus', 'var(--text-primary)', 13) + ' 세대 추가</button></div>' +
-      '<div class="scroll-x" style="gap:6px">' + proj.items.map(function (it) {
-        var on = it.idx === i;
-        return '<button class="pill gegen' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
-      }).join('') + '</div></div>';
+    // 과제의 모든 세대·계통을 한 표로 — 세대 칸을 고치면 저장할 때 그 세대로 옮겨진다
+    var nAll = 0, rows = proj.items.map(function (it) {
+      return it.g.lines.map(function (l, li) {
+        nAll++;
+        var cel = function (f, val, w, extra) {
+          return '<td style="padding:3px 2px"><input class="geL" data-g="' + it.idx + '" data-i="' + li + '" data-f="' + f + '" ' + (extra || '') +
+            ' value="' + esc(val == null ? '' : String(val)) + '" style="' + (w ? 'width:' + w + ';' : 'width:100%;min-width:0;') +
+            'height:34px;font-size:12px;border:0.5px solid var(--border);border-radius:6px;padding:0 ' + (w ? '2px;text-align:center' : '5px') +
+            ';background:var(--surface-2);color:var(--text-primary)"></td>';
+        };
+        return '<tr style="border-top:0.5px solid var(--border)">' +
+          '<td style="padding:3px 1px;color:var(--text-muted);font-size:11px;text-align:center">' + nAll + '</td>' +
+          cel('label', l.label) +
+          cel('pedigree', l.pedigree || '', '', 'placeholder="품종명/Pedigree"') +
+          cel('gen', l.gen || it.g.label || '', '44px') +
+          cel('rep', l.rep || '', '38px', 'type="number"') +
+          cel('indivTotal', l.indivTotal || '', '40px', 'type="number"') +
+          '<td style="padding:3px 0"><button class="btn geLdel" data-g="' + it.idx + '" data-i="' + li + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 13) + '</button></td></tr>';
+      }).join('');
+    }).join('');
+    // 형질은 세대마다 따로 두므로 형질 묶음만 세대를 골라 본다 (계통 표는 모든 세대를 한 번에 보여 준다)
+    var traitGenPick = proj.items.length > 1
+      ? '<div class="scroll-x" style="gap:6px;margin-bottom:8px"><span style="font-size:11px;color:var(--text-muted);flex:0 0 auto;align-self:center">형질을 볼 세대</span>' +
+        proj.items.map(function (it) {
+          var on = it.idx === i;
+          return '<button class="pill gegen' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + ' ' + it.g.lines.length + '</span></button>';
+        }).join('') + '</div>'
+      : '';
     v.innerHTML =
-      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + '세대 ' + proj.items.length + ' · 편집 중 ' + esc(g.label) + '</div></div></div>' +
+      '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="geBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">과제 수정</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + '세대 ' + proj.items.length + '개 · 계통 ' + nAll + '개를 한 번에</div></div></div>' +
       '<div style="flex:1;padding:16px 14px;overflow:auto">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></label><input class="ein" id="geName" style="margin-top:6px" value="' + esc(g.projName) + '">' +
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></div>' +
@@ -1774,7 +1787,7 @@
           var on = c.name === S.geCrop;
           return '<button class="pill gecrop' + (on ? ' on' : '') + '" data-c="' + esc(c.name) + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';margin-right:5px"></span>' + esc(c.name) + '</button>';
         }).join('') + '<button class="pill" id="geCropAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div>' +
-        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">필드 / 구역</label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
+        '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">필드 / 구역 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></label><input class="ein" id="geZone" style="margin-top:6px" value="' + esc((g.lines[0] && g.lines[0].zone) || '') + '">' +
         // 경종 개요 — 파종일 · 정식일 (엑셀 야장 B2에 들어갑니다)
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:16px 0 6px">경종 개요 <span style="color:var(--text-muted);font-weight:400">(모든 세대에 적용)</span></div>' +
         '<div style="display:flex;gap:8px">' +
@@ -1787,18 +1800,20 @@
           '<span style="font-size:11px;color:var(--text-muted);line-height:1.6">엑셀 야장의 <b>경종 개요</b> 칸에 들어갑니다.</span>' +
           '<button class="btn" id="geDateClr" style="height:28px;padding:0 10px;font-size:11px;color:var(--text-secondary);flex:0 0 auto">날짜 지우기</button>' +
         '</div>' +
-        genBar +
         // traits
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">적용 형질 <b style="color:var(--text-primary)">' + g.traits.length + '</b>개 <span style="color:var(--text-muted);font-weight:400">· ' + esc(g.label) + '</span></span><button class="btn" id="geTrait" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('adjustments', 'var(--text-primary)', 14) + ' 형질 편집</button></div>' +
+        traitGenPick +
         '<div style="max-height:132px;overflow:auto;border:0.5px solid var(--border);border-radius:10px;padding:9px 9px 3px">' + (traitTags || '<span style="font-size:12px;color:var(--text-muted)">형질이 없습니다</span>') + '</div>' +
         (proj.items.length > 1 ? '<button class="btn" id="geTraitAll" style="width:100%;height:38px;font-size:12px;margin-top:8px;color:var(--text-secondary)">이 형질세트를 과제의 모든 세대에 적용</button>' : '') +
         // lines table
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500">등록 조합·계통 <b style="color:var(--text-primary)">' + g.lines.length + '</b></span><button class="btn" id="geBulk" style="height:32px;padding:0 11px;font-size:12px;display:inline-flex;align-items:center;gap:4px">' + ico('table', 'var(--text-primary)', 14) + ' 일괄등록</button></div>' +
-        '<div style="max-height:300px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;margin-bottom:8px;gap:6px"><span style="font-size:12px;color:var(--text-secondary);font-weight:500;flex:1;min-width:0">등록 조합·계통 <b style="color:var(--text-primary)">' + nAll + '</b>' + (proj.items.length > 1 ? ' <span style="color:var(--text-muted);font-weight:400">· 세대 ' + proj.items.length + '개 모아 보기</span>' : '') + '</span>' +
+          '<button class="btn" id="geAddGen" style="height:32px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px;flex:0 0 auto">' + ico('plus', 'var(--text-primary)', 13) + ' 세대</button>' +
+          '<button class="btn" id="geBulk" style="height:32px;padding:0 10px;font-size:12px;display:inline-flex;align-items:center;gap:4px;flex:0 0 auto">' + ico('table', 'var(--text-primary)', 14) + ' 일괄등록</button></div>' +
+        '<div style="max-height:360px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
           '<table style="width:100%;border-collapse:collapse;table-layout:fixed"><colgroup><col style="width:22px"><col><col><col style="width:48px"><col style="width:42px"><col style="width:44px"><col style="width:30px"></colgroup><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1"><th style="font-size:11px;padding:6px 1px">#</th><th style="font-size:11px;padding:6px 2px;text-align:left">라벨번호</th><th style="font-size:11px;padding:6px 2px;text-align:left">품종명/Pedigree</th><th style="font-size:11px;padding:6px 1px">세대</th><th style="font-size:11px;padding:6px 1px">반복</th><th style="font-size:11px;padding:6px 1px">개체수</th><th style="padding:0"></th></tr></thead><tbody>' + rows + '</tbody></table>' +
         '</div>' +
         '<button class="btn" id="geLadd" style="width:100%;height:40px;font-size:13px;margin-top:8px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 계통 추가</button>' +
-        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">표에서 직접 수정할 수 있습니다. 세대를 다르게 적으면 저장 시 해당 세대 과제로 분리됩니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">과제의 <b>모든 세대</b>를 한 표에서 수정합니다. <b>세대</b> 칸을 고치면 저장할 때 그 세대로 옮겨지고(없는 세대면 새로 만듭니다), 조사값·선발 표시도 함께 따라갑니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
         '<div style="display:flex;gap:8px;margin-top:20px">' +
           (proj.items.length > 1 ? '<button class="btn" id="geDelGen" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' ' + esc(g.label) + ' 세대 삭제</button>' : '') +
           '<button class="btn" id="geDel" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' 과제 전체 삭제</button></div>' +
@@ -1806,7 +1821,9 @@
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="geSave" style="width:100%;height:48px;font-size:15px">저장</button></div>';
     function collect() {
       v.querySelectorAll('.geL').forEach(function (inp) {
-        var li = +inp.getAttribute('data-i'), f = inp.getAttribute('data-f'), l = g.lines[li]; if (!l) return;
+        var gi = +inp.getAttribute('data-g'), li = +inp.getAttribute('data-i'), f = inp.getAttribute('data-f');
+        var og = S.gens[gi]; if (!og) return;
+        var l = og.lines[li]; if (!l) return;
         if (f === 'label') l.label = inp.value.trim() || l.label;
         else if (f === 'pedigree') l.pedigree = inp.value.trim();
         else if (f === 'gen') l.gen = inp.value.trim();
@@ -1832,7 +1849,29 @@
       kvSet('gens', S.gens).then(function () { toast('모든 세대에 적용됨'); });
     };
     $('geLadd').onclick = function () { collect(); var n = g.lines.length + 1; g.lines.push({ id: 'L' + Date.now() + '_' + n, label: (g.prefix || yy()) + '-' + String(n).padStart(4, '0'), pedigree: '', gen: g.label, rep: 1, block: 'B-1', zone: (g.lines[0] && g.lines[0].zone) || 'A동', row: Math.floor((n - 1) / 10) + 1, col: ((n - 1) % 10) + 1, indivTotal: (g.lines[0] ? g.lines[0].indivTotal : 10), selected: false }); renderGenEdit(); };
-    v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () { var li = +b.getAttribute('data-i'), l = g.lines[li]; if (!l) return; if (g.lines.length <= 1) { toast('계통은 최소 1개 필요합니다'); return; } askConfirm('"' + l.label + '" 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.', { title: '계통 삭제', danger: true, ok: '삭제' }).then(function (ok) { if (!ok) return; collect(); var lid = l.id; g.lines.splice(li, 1); obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === g.id && r.lineId === lid) st.delete(r.k); }); }); renderGenEdit(); }); }; });
+    v.querySelectorAll('.geLdel').forEach(function (b) { b.onclick = function () {
+      var gi = +b.getAttribute('data-g'), li = +b.getAttribute('data-i');
+      var og = S.gens[gi]; if (!og) return;
+      var l = og.lines[li]; if (!l) return;
+      var tot = 0; proj.items.forEach(function (it) { tot += it.g.lines.length; });
+      if (tot <= 1) { toast('계통은 최소 1개 필요합니다'); return; }
+      askConfirm('"' + l.label + '" (' + og.label + ') 계통을 삭제할까요?\n이 계통의 수집값도 삭제됩니다.', { title: '계통 삭제', danger: true, ok: '삭제' }).then(function (ok) {
+        if (!ok) return;
+        collect();
+        var lid = l.id, gid = og.id;
+        og.lines.splice(li, 1);
+        // 세대가 통째로 비면 그 세대도 없앤다 (지금 편집 기준이던 세대면 남은 첫 세대로 옮긴다)
+        if (!og.lines.length) {
+          var at = S.gens.indexOf(og);
+          S.gens.splice(at, 1);
+          var left = projects().filter(function (x) { return x.id === proj.id; })[0];
+          S.editIdx = (left && left.items[0]) ? left.items[0].idx : 0;
+          if (S.genIdx >= S.gens.length) S.genIdx = Math.max(0, S.gens.length - 1);
+        } else if (S.editIdx >= S.gens.length) S.editIdx = S.gens.length - 1;
+        obsAll().then(function (all) { var st = os('obs', 'readwrite'); all.forEach(function (r) { if (r.genId === gid && r.lineId === lid) st.delete(r.k); }); });
+        kvSet('gens', S.gens).then(function () { renderGenEdit(); });
+      });
+    }; });
     S._geSave = function () {
       collect();
       var newName = $('geName').value.trim() || g.projName;
@@ -1840,44 +1879,140 @@
       var newCrop = S.geCrop || g.crop, newColor = S.geColor || g.color;
       var sow = ($('geSow') ? $('geSow').value : '') || '', plant = ($('gePlant') ? $('gePlant').value : '') || '';
       S.gens.forEach(function (x) { if (projKeyOf(x) === pk) { x.projName = newName; x.crop = newCrop; x.color = newColor; x.sowDate = sow; x.plantDate = plant; } });
-      var zn = $('geZone').value.trim(); if (zn) g.lines.forEach(function (l) { l.zone = zn; });
+      var zn = $('geZone').value.trim();
+      if (zn) S.gens.forEach(function (x) { if (projKeyOf(x) === pk) x.lines.forEach(function (l) { l.zone = zn; }); });
       S.geDirty = false;
-      splitGenByLabel(g, i).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대별로 분리' : '저장됨'); go('home'); }); });
+      regroupProjectGens(pk).then(function (moved) { kvSet('gens', S.gens).then(function () { toast(moved ? '저장됨 · 세대 ' + moved + '건 옮김' : '저장됨'); go('home'); }); });
     };
     $('geSave').onclick = function () { S._geSave(); };
   }
-  // move lines whose 세대 differs into their own generation entries
-  function splitGenByLabel(g, idx) {
-    var groups = {}, moved = false;
-    g.lines.forEach(function (l) { var gl = (l.gen || g.label).trim() || g.label; (groups[gl] = groups[gl] || []).push(l); });
-    var keys = Object.keys(groups);
-    if (keys.length <= 1) { g.lines.forEach(function (l) { delete l.gen; }); if (keys.length === 1 && keys[0] !== g.label) { g.label = keys[0]; moved = true; } return Promise.resolve(moved); }
-    moved = true;
-    var keep = groups[g.label] || groups[keys[0]], keepLabel = groups[g.label] ? g.label : keys[0];
-    var base = Date.now(), extras = [];
-    keys.forEach(function (gl, n) {
-      if (gl === keepLabel) return;
-      var lines = groups[gl].map(function (l, li) { var c = JSON.parse(JSON.stringify(l)); delete c.gen; c.id = 'L' + String(li + 1).padStart(3, '0'); c.row = Math.floor(li / 10) + 1; c.col = (li % 10) + 1; return c; });
-      extras.push({ id: 'G' + base + '_' + n, projId: projKeyOf(g), projName: g.projName, crop: g.crop, color: g.color, label: gl, prefix: g.prefix, surveyDates: g.surveyDates.slice(), traits: JSON.parse(JSON.stringify(g.traits)), lines: lines });
+  /* 과제 전체를 '세대' 칸 값대로 다시 묶는다 (과제 수정 화면이 모든 세대를 한 표로 보여 주므로,
+   * 어느 줄이든 세대를 고칠 수 있다)
+   *   · 이미 있는 세대 이름으로 적으면 그 세대로 **옮기고**, 없는 이름이면 세대를 새로 만든다.
+   *   · 옮겨진 계통의 조사값·개체 선발 표시도 함께 따라간다.
+   *   · 보내는 쪽과 받는 쪽의 형질 id 가 다르면 **형질 이름으로 짝을 맞춰** 값이 사라지지 않게 한다.
+   *     (이름이 같은 형질이 없으면 그 형질을 받는 세대에 복사해 넣는다)
+   *   옮긴 계통 수를 돌려준다 (0 이면 바뀐 것 없음).
+   */
+  function regroupProjectGens(pk) {
+    var items = [];
+    S.gens.forEach(function (x, ix) { if (projKeyOf(x) === pk) items.push({ g: x, i: ix }); });
+    if (!items.length) return Promise.resolve(0);
+
+    // 1) 희망 세대 이름별로 계통을 모은다
+    var want = {}, order = [], changed = 0;
+    items.forEach(function (it) {
+      it.g.lines.forEach(function (l) {
+        var lab = String(l.gen == null ? '' : l.gen).trim() || it.g.label;
+        if (!want[lab]) { want[lab] = []; order.push(lab); }
+        want[lab].push({ l: l, from: it.g });
+        if (lab !== it.g.label) changed++;
+      });
     });
-    // move observations of relocated lines to the new gen ids
-    var lineToGen = {}; extras.forEach(function (ng) { ng.lines.forEach(function (l) { lineToGen[l.label] = ng.id; }); });
-    var oldIdByLabel = {}; g.lines.forEach(function (l) { oldIdByLabel[l.label] = l.id; });
-    g.label = keepLabel;
-    g.lines = keep.map(function (l, li) { var c = l; delete c.gen; c.row = Math.floor(li / 10) + 1; c.col = (li % 10) + 1; return c; });
-    S.gens.splice(idx + 1, 0, ...extras);
+    items.forEach(function (it) { it.g.lines.forEach(function (l) { delete l.gen; }); });
+    if (!changed) return Promise.resolve(0);
+
+    var base = items[0].g;
+    var byLabel = {}; items.forEach(function (it) { if (!byLabel[it.g.label]) byLabel[it.g.label] = it.g; });
+
+    // 받는 세대에 같은 이름의 형질이 없으면 복사해 넣고, 보내는 세대의 형질 id → 받는 세대 id 짝을 만든다
+    function traitMap(from, to) {
+      if (from.id === to.id) return null;
+      var byName = {}; (to.traits || []).forEach(function (t) { byName[t.name] = t; });
+      var map = {};
+      (from.traits || []).forEach(function (t) {
+        var hit = byName[t.name];
+        if (!hit) { hit = JSON.parse(JSON.stringify(t)); hit.id = 'T' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); to.traits.push(hit); byName[t.name] = hit; }
+        map[t.id] = hit.id;
+      });
+      return map;
+    }
+
+    var moves = [], newGens = [], seq = [];
+    order.forEach(function (lab, n) {
+      var tgt = byLabel[lab];
+      if (!tgt) {                                   // 없는 세대 — 새로 만든다
+        tgt = { id: 'G' + Date.now() + '_' + n, projId: pk, projName: base.projName, crop: base.crop, color: base.color,
+                label: lab, prefix: base.prefix, surveyDates: (base.surveyDates || []).slice(),
+                sowDate: base.sowDate || '', plantDate: base.plantDate || '',
+                traits: JSON.parse(JSON.stringify(base.traits || [])), lines: [] };
+        byLabel[lab] = tgt; newGens.push(tgt);
+      }
+      var used = {};                                // 받는 세대에서 이미 쓰고 있는 계통 id
+      want[lab].forEach(function (w) { if (w.from.id === tgt.id) used[w.l.id] = 1; });
+      // 원래 그 세대에 있던 계통이 먼저, 옮겨 온 계통은 뒤에
+      var ordered = want[lab].filter(function (w) { return w.from.id === tgt.id; })
+                    .concat(want[lab].filter(function (w) { return w.from.id !== tgt.id; }));
+      var lines = [];
+      ordered.forEach(function (w) {
+        var l = w.l;
+        if (w.from.id !== tgt.id) {
+          var oldId = l.id;
+          if (used[l.id]) l.id = 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);   // id 가 겹치면 새로 준다
+          used[l.id] = 1;
+          moves.push({ fromGen: w.from.id, fromLine: oldId, toGen: tgt.id, toLine: l.id, tmap: traitMap(w.from, tgt) });
+        }
+        lines.push(l);
+      });
+      lines.forEach(function (l, li) { l.row = Math.floor(li / 10) + 1; l.col = (li % 10) + 1; });
+      tgt.lines = lines;
+      seq.push(tgt);
+    });
+
+    // 2) 과제의 세대 목록을 새로 만든 뒤 제자리에 끼워 넣는다 (빈 세대는 버린다)
+    var keep = seq.filter(function (x) { return x.lines.length; });
+    keep.sort(function (a, b) { return byGen(a.label, b.label); });
+    var out = [], placed = false;
+    S.gens.forEach(function (x) {
+      if (projKeyOf(x) === pk) { if (!placed) { out = out.concat(keep); placed = true; } return; }
+      out.push(x);
+    });
+    if (!placed) out = out.concat(keep);
+    S.gens = out;
+    var first = 0; for (var q = 0; q < S.gens.length; q++) if (projKeyOf(S.gens[q]) === pk) { first = q; break; }
+    S.editIdx = first;
+    if (!S.gens[S.genIdx] || projKeyOf(S.gens[S.genIdx]) !== pk) S.genIdx = first;
+    S.lineIdx = 0; S.indiv = 1;
+
+    if (!moves.length) return Promise.resolve(0);
+
+    // 3) 개체 선발 표시 — 계통 id 가 바뀐 것만 옮긴다
+    var idChanged = moves.filter(function (m) { return m.fromLine !== m.toLine; });
+    if (idChanged.length) {
+      // 계통 id 는 세대마다 따로 매겨져 같은 id 가 다른 세대에도 있을 수 있다.
+      // 그 id 를 아직 쓰는 계통이 남아 있으면 원래 표시를 지우지 않고 복사만 한다.
+      var stillUsed = {};
+      S.gens.forEach(function (x) { x.lines.forEach(function (l) { stillUsed[l.id] = 1; }); });
+      idChanged.forEach(function (m) {
+        Object.keys(S.indivSel).forEach(function (k) {
+          if (k.indexOf(m.fromLine + ':') !== 0) return;
+          var iv = k.slice(m.fromLine.length + 1);
+          if (S.indivSel[k]) S.indivSel[m.toLine + ':' + iv] = true;
+          if (!stillUsed[m.fromLine]) delete S.indivSel[k];
+        });
+      });
+      kvSet('indivSel', S.indivSel);
+    }
+
+    // 4) 조사값을 새 세대·새 계통 id 로 옮긴다
+    var key = {};
+    moves.forEach(function (m) { key[m.fromGen + '|' + m.fromLine] = m; });
     return obsAll().then(function (all) {
       return new Promise(function (res) {
         var tx = DB.transaction('obs', 'readwrite'), st = tx.objectStore('obs');
         all.forEach(function (r) {
-          if (r.genId !== g.id) return;
-          var lbl = null; for (var k in oldIdByLabel) { if (oldIdByLabel[k] === r.lineId) { lbl = k; break; } }
-          var target = lbl && lineToGen[lbl];
-          if (target) { st.delete(r.k); r.genId = target; r.k = target + ':' + r.lineId + ':' + r.indiv + ':' + r.traitId + (r.date ? ('@' + r.date) : ''); r.dirty = 1; r.updatedAt = Date.now(); st.put(r); }
+          var m = key[r.genId + '|' + r.lineId]; if (!m) return;
+          st.delete(r.k);
+          r.genId = m.toGen; r.lineId = m.toLine;
+          if (m.tmap && m.tmap[r.traitId]) r.traitId = m.tmap[r.traitId];
+          r.k = r.genId + ':' + r.lineId + ':' + r.indiv + ':' + r.traitId + (r.date ? ('@' + r.date) : '');
+          r.dirty = 1; r.updatedAt = Date.now();
+          st.put(r);
         });
-        tx.oncomplete = function () { res(moved); }; tx.onerror = function () { res(moved); };
+        tx.oncomplete = function () { res(moves.length); };
+        tx.onerror = function () { res(moves.length); };
       });
-    });
+    }).then(function (n) { return loadVals().then(function () { return updatePending(); }).then(function () { return n; }); });
   }
 
   function projRowHTML(p, inFolder) {
@@ -2129,24 +2264,31 @@
     if (S._mapLine !== curLine().id) renderMap(); else paintIndivCur();
     var n = $('cNum'); if (n) n.textContent = '개체 ' + S.indiv + '/' + total();
   }
+  /* 과제의 모든 세대를 한 목록으로 본다.
+   *   예전에는 세대 칩(F1·F3·F#)을 눌러 한 세대씩만 봤지만, 지금은 세대를 가로질러
+   *   라벨번호가 한 줄로 이어진다. 이 줄은 '전체 몇 번째인지'와 지금 세대를 알려 준다.
+   *   (이동 자체는 예전부터 projSeq() 로 세대를 넘나들었다)
+   */
   function renderGenBar() {
     var bar = $('cGenBar'); if (!bar) return;
-    var p = projectOf(curProjKey());
-    if (!p || p.items.length < 2) { bar.innerHTML = ''; bar.style.padding = '0'; return; }
+    var seq = projSeq(), pos = seqPos(seq);
+    if (seq.length < 2) { bar.innerHTML = ''; bar.style.padding = '0'; return; }
+    var g = curGen(), p = projectOf(curProjKey());
+    var pct = Math.round(((pos + 1) / seq.length) * 100);
+    var genTag = (p && p.items.length > 1)
+      ? '<span style="flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)">' +
+          '<span style="background:#EAF3DE;color:#27500A;border-radius:9px;padding:2px 8px;font-weight:600">' + esc(g.label) + '</span>' +
+          esc(genRole(g.label)) + ' 세대</span>'
+      : '';
     bar.style.padding = '8px 12px 0';
-    bar.innerHTML = '<div class="scroll-x" style="gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">세대</span>' +
-      p.items.map(function (it) {
-        var on = it.idx === S.genIdx;
-        return '<button class="pill cgenchip' + (on ? ' on' : '') + '" data-i="' + it.idx + '">' + esc(it.g.label) + ' <span style="font-size:10px;color:var(--text-muted)">' + genRole(it.g.label) + '</span></button>';
-      }).join('') + '</div>';
-    bar.querySelectorAll('.cgenchip').forEach(function (b) {
-      b.onclick = function () {
-        var i = +b.getAttribute('data-i'); if (i === S.genIdx) return;
-        S.genIdx = i; S.lineIdx = 0; S.indiv = 1;
-        var g2 = curGen(); S.date = g2.surveyDates[g2.surveyDates.length - 1]; S.trait = g2.traits[0] ? g2.traits[0].id : null;
-        loadVals().then(function () { renderCollect(); });
-      };
-    });
+    bar.innerHTML =
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<span style="flex:1;min-width:0;font-size:11px;color:var(--text-secondary)">' +
+          ico('list-numbers', '#639922', 13) + ' 라벨번호 <b style="color:#27500A">' + (pos + 1) + '</b> / ' + seq.length +
+          (p && p.items.length > 1 ? ' <span style="color:var(--text-muted)">· 세대 ' + p.items.length + '개를 이어서</span>' : '') +
+        '</span>' + genTag +
+      '</div>' +
+      '<div style="height:3px;border-radius:2px;background:var(--surface-1);margin-top:5px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:#9FBE7C"></div></div>';
   }
   function moveIndiv(d) {
     var nv = Math.max(1, Math.min(total(), S.indiv + d));
@@ -2181,17 +2323,18 @@
     (p ? p.items : []).forEach(function (it) { it.g.lines.forEach(function (l, li) { seq.push({ gi: it.idx, li: li }); }); });
     return seq;
   }
-  function moveLine(d) {
-    var seq = projSeq(), pos = -1;
-    for (var i = 0; i < seq.length; i++) { if (seq[i].gi === S.genIdx && seq[i].li === S.lineIdx) { pos = i; break; } }
-    if (pos < 0) { // 안전장치: 세대 내에서만 이동
-      var g0 = curGen(), nv0 = Math.max(0, Math.min(g0.lines.length - 1, S.lineIdx + d));
-      if (nv0 === S.lineIdx) return; S.lineIdx = nv0; S.indiv = 1; renderCollect(); return;
-    }
-    var np = pos + d;
+  // 지금 보고 있는 라벨번호가 과제 전체에서 몇 번째인지
+  function seqPos(seq) {
+    seq = seq || projSeq();
+    for (var i = 0; i < seq.length; i++) if (seq[i].gi === S.genIdx && seq[i].li === S.lineIdx) return i;
+    return -1;
+  }
+  // 과제 전체 순서에서 np 번째 라벨번호로 간다 (세대를 넘어가면 형질·조사일을 맞춰 준다)
+  function gotoSeqPos(np, quiet) {
+    var seq = projSeq();
     if (np < 0 || np >= seq.length) { toast(np < 0 ? '과제의 첫 라벨번호입니다' : '과제의 마지막 라벨번호입니다'); return; }
     var t = seq[np];
-    if (t.gi === S.genIdx) { S.lineIdx = t.li; S.indiv = 1; renderCollect(); return; }
+    if (t.gi === S.genIdx) { if (t.li === S.lineIdx) return; S.lineIdx = t.li; S.indiv = 1; renderCollect(); return; }
     var keepName = (traitById(S.trait) || {}).name;
     S.genIdx = t.gi; S.lineIdx = t.li; S.indiv = 1;
     var g2 = curGen();
@@ -2199,7 +2342,15 @@
     var same = null;
     (g2.traits || []).forEach(function (tt) { if (!same && tt.name === keepName) same = tt; });
     S.trait = (same || g2.traits[0] || {}).id || null;
-    loadVals().then(function () { renderCollect(); toast(g2.label + ' 세대로 이어서 조사'); });
+    loadVals().then(function () { renderCollect(); if (!quiet) toast(g2.label + ' 세대로 이어서 조사'); });
+  }
+  function moveLine(d) {
+    var seq = projSeq(), pos = seqPos(seq);
+    if (pos < 0) { // 안전장치: 세대 내에서만 이동
+      var g0 = curGen(), nv0 = Math.max(0, Math.min(g0.lines.length - 1, S.lineIdx + d));
+      if (nv0 === S.lineIdx) return; S.lineIdx = nv0; S.indiv = 1; renderCollect(); return;
+    }
+    gotoSeqPos(pos + d);
   }
 
   function renderCard() {
@@ -2770,7 +2921,7 @@
         '<div class="grid" id="mIndiv" style="gap:4px"></div>' +
         '<div id="mIfoot" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>' +
         '<div style="height:1px;background:var(--border);margin:12px 0"></div>' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('layout-grid', '#639922', 12) + ' 조합·계통 순번 (탭 이동)</span><span><span style="color:#E8B84B">★</span> 계통 · <span style="color:#C08A2B;font-size:8px">★</span> 개체</span></div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('layout-grid', '#639922', 12) + ' 조합·계통 순번 · 과제 전체 (탭 이동)</span><span><span style="color:#E8B84B">★</span> 계통 · <span style="color:#C08A2B;font-size:8px">★</span> 개체</span></div>' +
         '<div id="mLineScroll" style="overflow:auto"><div class="grid" id="mLine" style="gap:4px"></div></div>' +
         '<div id="mLfoot" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>' +
       '</div>';
@@ -2800,28 +2951,34 @@
     $('mIfoot').textContent = l.label + ' · ' + (S.showSelOnly ? '선발 ' + iselN + '개체' : '총 ' + total() + '개체 · 선발 ' + iselN);
     $('mIhint').textContent = '현재 ' + S.indiv + '/' + total();
 
-    // line map
+    // line map — 과제의 모든 세대를 한 줄로 이어서 보여 준다 (세대가 바뀌는 칸은 테두리로 표시)
     var gl2 = $('mLine'); gl2.style.gridTemplateColumns = 'repeat(' + cols + ',' + cell + 'px)';
-    var lineEntered = {};
-    var lsh = 0, lselN = 0, lselI = 0;
-    g.lines.forEach(function (ln, i) {
+    var seq = projSeq(), here = seqPos(seq);
+    var lsh = 0, lselN = 0, lselI = 0, prevGi = null;
+    seq.forEach(function (sq, i) {
+      var sg = S.gens[sq.gi]; if (!sg) return;
+      var ln = sg.lines[sq.li]; if (!ln) return;
       if (ln.selected) lselN++; else if (selLines[ln.id]) lselI++;
+      var newGen = prevGi !== null && sq.gi !== prevGi; prevGi = sq.gi;
       if (S.showSelOnly && !ln.selected && !selLines[ln.id]) return;
       var b = document.createElement('button'); b.className = 'mm'; b.style.width = cell + 'px'; b.style.height = cell + 'px';
-      var isCur = i === S.lineIdx;
+      var isCur = i === here;
       if (isCur) { b.style.background = '#639922'; b.style.color = '#fff'; b.style.borderColor = '#3B6D11'; }
-      else if (lineEntered[ln.id]) { b.style.background = '#F1F6E8'; }
+      if (newGen) { b.style.borderLeft = '2px solid #639922'; }      // 세대가 바뀌는 자리
       if (ln.selected) {
         b.innerHTML = '<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(cell * 0.98) + 'px;color:' + (isCur ? '#E0B94F' : '#EBCB78') + ';pointer-events:none">★</span><span style="position:relative;z-index:1;font-weight:600">' + (i + 1) + '</span>';
       } else {
         b.textContent = (i + 1);
         if (selLines[ln.id]) { var stq = document.createElement('span'); stq.textContent = '★'; stq.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (isCur ? '#fff' : '#C08A2B'); b.appendChild(stq); }
       }
-      b.onclick = function () { S.lineIdx = i; S.indiv = 1; renderCollect(); };
+      b.title = sg.label + ' · ' + ln.label;
+      b.onclick = function () { gotoSeqPos(i, true); };
       gl2.appendChild(b); lsh++;
     });
     if (S.showSelOnly && lsh === 0) gl2.innerHTML = '<div style="grid-column:1/-1;font-size:11px;color:var(--text-muted);text-align:center;padding:6px 0">선발된 항목이 없습니다</div>';
-    $('mLfoot').textContent = S.showSelOnly ? ('계통선발 ' + lselN + ' · 개체선발 있는 계통 ' + lselI) : ('총 ' + g.lines.length + ' 계통 · 선발 ' + lselN);
+    var pj = projectOf(curProjKey());
+    var genTxt = (pj && pj.items.length > 1) ? ' · 세대 ' + pj.items.length + '개 이어 보기' : '';
+    $('mLfoot').textContent = S.showSelOnly ? ('계통선발 ' + lselN + ' · 개체선발 있는 계통 ' + lselI) : ('총 ' + seq.length + ' 계통' + genTxt + ' · 선발 ' + lselN);
   }
   // 개체만 옮겼을 때 — 필드맵을 다시 만들지 않고 개체 칸 색만 고친다
   function paintIndivCur() {
