@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.11.4 12:46';
+  var APP_VERSION = '26.11.4 17:26';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -3749,7 +3749,7 @@
         ? '고른 조사일에 <b>두 날 이상 값이 있는 라벨번호</b>가 없습니다.'
         : '고른 조사일에 <b>두 번 이상 값이 있는 개체</b>가 없습니다.<br><span style="font-size:12px">개체마다 최소 두 날짜의 값이 있어야 면적을 구할 수 있습니다.</span>');
     }
-    if (S.audpcSort === 'val') rows.sort(function (a, b) { return b.audpc - a.audpc; });
+    if (S.audpcSort === 'val') rows.sort(function (a, b) { return a.audpc - b.audpc; });
 
     var r1 = function (x) { return Math.round(x * 10) / 10; };
     var vs = rows.map(function (r) { return r.audpc; });
@@ -3769,7 +3769,7 @@
     var tools =
       '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;margin-bottom:6px">' +
         '<span style="font-size:12px;color:var(--text-secondary);font-weight:500;flex:1">' + (mode === 'line' ? '라벨번호별 AUDPC' : '개체별 AUDPC') + '</span>' +
-        '<button class="btn" id="apSort" style="height:30px;padding:0 10px;font-size:11.5px">' + (S.audpcSort === 'val' ? '값 큰 순 ↓' : '라벨번호 순') + '</button>' +
+        '<button class="btn" id="apSort" style="height:30px;padding:0 10px;font-size:11.5px">' + (S.audpcSort === 'val' ? '값 작은 순 ↑' : '라벨번호 순') + '</button>' +
         '<button class="btn" id="apCsv" style="height:30px;padding:0 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:4px">' + ico('download', 'var(--text-primary)', 13) + ' CSV</button>' +
       '</div>';
 
