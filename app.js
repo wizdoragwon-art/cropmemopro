@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.10.20 14:17';
+  var APP_VERSION = '26.11.4 12:46';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -3505,6 +3505,100 @@
     }
     return out;
   }
+  /* ===== AUDPC (병 진전 곡선 아래 면적) =====
+   * 같은 형질을 여러 날 조사했을 때, 고른 조사일들을 이어 사다리꼴로 면적을 구한다.
+   *   AUDPC = Σ ((y1 + y2) / 2) × (t2 - t1)      t 는 조사일 사이의 '일수'
+   * 개체마다 따로 구한다. 값이 없거나 숫자가 아닌 날(판독불가 등)은 건너뛰고 양옆을 잇는다.
+   */
+  // 조사일 라벨('9/28' · '2026-09-28') → 날짜 일련번호(일)
+  function dayNum(label) {
+    var t = String(label == null ? '' : label).trim();
+    var m = t.match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/), d;
+    if (m) d = new Date(+m[1], +m[2] - 1, +m[3]);
+    else {
+      var m2 = t.match(/^(\d{1,2})\D(\d{1,2})$/);
+      if (!m2) return null;
+      d = new Date(new Date().getFullYear(), +m2[1] - 1, +m2[2]);
+    }
+    return Math.round(d.getTime() / 86400000);
+  }
+  // 고른 조사일들을 순서대로 '며칠째'로 바꾼다 (해를 넘기면 365일을 더해 거꾸로 가지 않게)
+  function dayOffsets(labels) {
+    var out = [], prev = null, bump = 0;
+    labels.forEach(function (lab) {
+      var n = dayNum(lab);
+      if (n == null) { out.push(null); return; }
+      n += bump;
+      if (prev != null && n < prev) { bump += 365; n += 365; }
+      prev = n; out.push(n);
+    });
+    return out;
+  }
+  /* 고른 조사일 (처음에는 모두 고른 상태)
+   * 조사일은 **만든 순서**를 그대로 쓴다. 월/일만 적힌 '12/28 → 1/4' 같은 해 넘김을
+   * 월·일 크기로 정렬하면 1/4 가 앞으로 와 날짜 간격이 358일로 뒤집히기 때문이다.
+   * (해를 넘긴 것은 dayOffsets 가 365일을 더해 바로잡는다)
+   */
+  function audpcDates() {
+    var g = curGen(), all = (g.surveyDates || []).slice();
+    var sel = S.audpcSel || {};
+    var picked = all.filter(function (d) { return sel[d]; });
+    return picked.length ? picked : all;
+  }
+  // 개체마다 AUDPC 한 줄씩
+  function audpcRows(t, dates) {
+    var g = curGen(), off = dayOffsets(dates), out = [];
+    if (!t || dates.length < 2) return out;
+    g.lines.forEach(function (l) {
+      if (!lineIncluded(l)) return;
+      for (var iv = 1; iv <= l.indivTotal; iv++) {
+        var xs = [], ys = [];
+        for (var i = 0; i < dates.length; i++) {
+          if (off[i] == null) continue;
+          var raw = S.vals[g.id + ':' + l.id + ':' + iv + ':' + t.id + '@' + dates[i]];
+          if (raw == null || raw === '') continue;
+          var v = parseFloat(raw); if (isNaN(v)) continue;      // 판독불가 등은 건너뛴다
+          xs.push(off[i]); ys.push(v);
+        }
+        if (xs.length < 2) continue;
+        var a = 0;
+        for (var k = 0; k + 1 < xs.length; k++) a += ((ys[k] + ys[k + 1]) / 2) * (xs[k + 1] - xs[k]);
+        out.push({ line: l, indiv: iv, n: xs.length, days: xs[xs.length - 1] - xs[0], audpc: a });
+      }
+    });
+    return out;
+  }
+  /* 라벨번호 평균값 기준 AUDPC
+   * 개체마다 면적을 구해 평균 내는 것(개체별)과 달리, **조사일마다 라벨번호 안 개체들의 값을
+   * 먼저 평균** 낸 뒤 그 평균값 곡선으로 면적을 구한다.
+   * 개체마다 빠진 날이 다를 때 두 값이 달라지므로, 어느 쪽인지 화면에 분명히 적어 둔다.
+   */
+  function audpcLineRows(t, dates) {
+    var g = curGen(), off = dayOffsets(dates), out = [];
+    if (!t || dates.length < 2) return out;
+    g.lines.forEach(function (l) {
+      if (!lineIncluded(l)) return;
+      var xs = [], ys = [], ivMax = 0;
+      for (var i = 0; i < dates.length; i++) {
+        if (off[i] == null) continue;
+        var sum = 0, n = 0;
+        for (var iv = 1; iv <= l.indivTotal; iv++) {
+          var raw = S.vals[g.id + ':' + l.id + ':' + iv + ':' + t.id + '@' + dates[i]];
+          if (raw == null || raw === '') continue;
+          var v = parseFloat(raw); if (isNaN(v)) continue;     // 판독불가 등은 평균에서 뺀다
+          sum += v; n++;
+        }
+        if (!n) continue;                                      // 그 날은 통째로 건너뛴다
+        if (n > ivMax) ivMax = n;
+        xs.push(off[i]); ys.push(sum / n);
+      }
+      if (xs.length < 2) return;
+      var a = 0;
+      for (var k = 0; k + 1 < xs.length; k++) a += ((ys[k] + ys[k + 1]) / 2) * (xs[k + 1] - xs[k]);
+      out.push({ line: l, indivN: ivMax, n: xs.length, days: xs[xs.length - 1] - xs[0], audpc: a });
+    });
+    return out;
+  }
   function isMeasure(t) { return t.type === 'numeric' || t.type === 'ratio' || t.type === 'counter' || (t.type === 'rating' && t.scale && typeof t.scale[0] === 'number'); }
   function renderAnalysis() {
     var g = curGen(), v = $('view-analysis');
@@ -3515,6 +3609,7 @@
       '<div style="display:flex;gap:8px;padding:10px 14px 2px">' +
         '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">요약 · 통계</button>' +
         '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">그래프 생성</button>' +
+        '<button class="btn anTab" data-t="audpc" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'audpc' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">AUDPC</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;padding:8px 14px 2px;align-items:center">' +
         '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">분석 대상</span>' +
@@ -3600,10 +3695,151 @@
   function renderAnDate() {
     var g = curGen(), t = traitById(S.anTrait), bar = $('anDate'); bar.innerHTML = '';
     if (!t) return;
+    if (S.anTab === 'audpc') { renderAudpcDates(bar, g); return; }
     var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
     g.surveyDates.forEach(function (d) { html += '<button class="btn anD" data-d="' + d + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (d === S.date ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + d + '</button>'; });
     html += '</div>'; bar.innerHTML = html;
     bar.querySelectorAll('.anD').forEach(function (b) { b.onclick = function () { S.date = b.getAttribute('data-d'); renderAnDate(); renderAnBody(); }; });
+  }
+  // AUDPC 탭의 조사일 고르기 — 여러 날을 체크해서 쓴다
+  function renderAudpcDates(bar, g) {
+    var all = (g.surveyDates || []).slice();          // 만든 순서 그대로 (audpcDates 주석 참고)
+    var picked = audpcDates(), on = {}; picked.forEach(function (d) { on[d] = 1; });
+    bar.innerHTML =
+      '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) +
+        '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">조사일 <b style="color:#27500A">' + picked.length + '</b>/' + all.length + ' 선택</span>' +
+        all.map(function (d) {
+          var o = !!on[d];
+          return '<button class="btn apD" data-d="' + esc(d) + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (o ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : ';color:var(--text-muted)') + '">' + (o ? '✓ ' : '') + esc(d) + '</button>';
+        }).join('') +
+        '<button class="btn" id="apAll" style="padding:4px 9px;font-size:11px;border-radius:16px;color:var(--text-secondary)">전체</button>' +
+      '</div>';
+    bar.querySelectorAll('.apD').forEach(function (b) { b.onclick = function () {
+      var d = b.getAttribute('data-d');
+      var sel = S.audpcSel || (S.audpcSel = {});
+      if (!Object.keys(sel).length) all.forEach(function (x) { sel[x] = 1; });   // 처음 누르면 '모두 선택'에서 시작
+      if (sel[d]) delete sel[d]; else sel[d] = 1;
+      renderAnDate(); renderAnBody();
+    }; });
+    $('apAll').onclick = function () { S.audpcSel = {}; renderAnDate(); renderAnBody(); };
+  }
+  function renderAudpc(body, t) {
+    var g = curGen(), all = (g.surveyDates || []);
+    var mode = (S.audpcMode === 'line') ? 'line' : 'indiv';
+    var modeBar =
+      '<div style="display:flex;gap:8px;margin-bottom:10px">' +
+        '<button class="btn apMode" data-m="indiv" style="flex:1;height:36px;font-size:12.5px' + (mode === 'indiv' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">개체별</button>' +
+        '<button class="btn apMode" data-m="line" style="flex:1;height:36px;font-size:12.5px' + (mode === 'line' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">라벨번호 평균</button>' +
+      '</div>';
+    var wire = function () {
+      body.querySelectorAll('.apMode').forEach(function (b) {
+        b.onclick = function () { S.audpcMode = b.getAttribute('data-m'); renderAnBody(); };
+      });
+    };
+    var stop = function (html) { body.innerHTML = modeBar + '<div style="padding:26px 10px;text-align:center;color:var(--text-muted)">' + html + '</div>'; wire(); };
+
+    if (!isMeasure(t)) return stop('AUDPC 는 <b>숫자로 집계되는 형질</b>에서만 구할 수 있습니다.<br><span style="font-size:12px">숫자 척도의 등급 · 수치형 · 비율 · 카운터 형질을 고르세요.</span>');
+    if (all.length < 2) return stop('조사일이 하나뿐입니다.<br><span style="font-size:12px">조사 화면에서 <b>+ 새 조사</b>로 다른 날짜를 추가하면 AUDPC 를 구할 수 있습니다.</span>');
+    var dates = audpcDates();
+    if (dates.length < 2) return stop('조사일을 <b>2개 이상</b> 고르세요.');
+
+    var rows = (mode === 'line') ? audpcLineRows(t, dates) : audpcRows(t, dates);
+    if (!rows.length) {
+      return stop(mode === 'line'
+        ? '고른 조사일에 <b>두 날 이상 값이 있는 라벨번호</b>가 없습니다.'
+        : '고른 조사일에 <b>두 번 이상 값이 있는 개체</b>가 없습니다.<br><span style="font-size:12px">개체마다 최소 두 날짜의 값이 있어야 면적을 구할 수 있습니다.</span>');
+    }
+    if (S.audpcSort === 'val') rows.sort(function (a, b) { return b.audpc - a.audpc; });
+
+    var r1 = function (x) { return Math.round(x * 10) / 10; };
+    var vs = rows.map(function (r) { return r.audpc; });
+    var mean = vs.reduce(function (a, b) { return a + b; }, 0) / vs.length;
+    var mn = Math.min.apply(null, vs), mx = Math.max.apply(null, vs);
+    var sd = Math.sqrt(vs.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / Math.max(1, vs.length - 1));
+
+    var head =
+      '<div style="font-size:11px;color:var(--text-secondary);line-height:1.7;background:var(--surface-1);border-radius:10px;padding:9px 11px">' +
+        ico('chart-bar', '#3B6D11', 13) + ' <b>' + esc(t.name) + '</b> · 조사일 ' + dates.map(esc).join(' → ') + '<br>' +
+        (mode === 'line'
+          ? '조사일마다 <b>라벨번호 안 개체들의 값을 먼저 평균</b> 낸 뒤, 그 평균값 곡선으로 면적을 구했습니다.'
+          : '<b>개체마다</b> 따로 면적을 구했습니다.') +
+        ' 값이 없거나 숫자가 아닌 날은 건너뛰고 양옆을 이었습니다.' +
+      '</div>';
+
+    var tools =
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:14px;margin-bottom:6px">' +
+        '<span style="font-size:12px;color:var(--text-secondary);font-weight:500;flex:1">' + (mode === 'line' ? '라벨번호별 AUDPC' : '개체별 AUDPC') + '</span>' +
+        '<button class="btn" id="apSort" style="height:30px;padding:0 10px;font-size:11.5px">' + (S.audpcSort === 'val' ? '값 큰 순 ↓' : '라벨번호 순') + '</button>' +
+        '<button class="btn" id="apCsv" style="height:30px;padding:0 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:4px">' + ico('download', 'var(--text-primary)', 13) + ' CSV</button>' +
+      '</div>';
+
+    var note = '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">‘조사’ 칸은 실제로 쓰인 조사일 수입니다. 고른 날 수(' + dates.length + ')보다 적으면 <span style="color:#B0721A">주황색</span>으로 표시됩니다.</div>';
+
+    if (mode === 'line') {
+      body.innerHTML = modeBar + head +
+        '<div style="display:flex;gap:8px;margin-top:10px">' + stcell('라벨번호', rows.length) + stcell('평균', r1(mean)) + stcell('표준편차', r1(sd)) + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' + stcell('최소', r1(mn)) + stcell('최대', r1(mx)) + stcell('조사일', dates.length) + '</div>' +
+        tools +
+        '<div style="max-height:400px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1">' +
+            '<th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 4px;width:50px">개체</th>' +
+            '<th style="text-align:center;padding:7px 4px;width:48px">조사</th><th style="text-align:right;padding:7px 10px;width:84px">AUDPC</th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr style="border-top:0.5px solid var(--border)">' +
+              '<td style="padding:6px 9px">' + esc(r.line.label) + (r.line.pedigree ? ' <span style="color:var(--text-muted)">' + esc(r.line.pedigree) + '</span>' : '') + '</td>' +
+              '<td style="padding:6px 4px;text-align:center;color:var(--text-secondary)">' + r.indivN + '</td>' +
+              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? '#B0721A' : 'var(--text-muted)') + '">' + r.n + '</td>' +
+              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:#27500A">' + r1(r.audpc) + '</td></tr>';
+          }).join('') + '</tbody></table></div>' +
+        note +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.6">‘개체’ 칸은 평균에 쓰인 개체 수(가장 많은 날 기준)입니다.</div>';
+    } else {
+      var byLine = {}, lineOrder = [];
+      rows.forEach(function (r) { var k = r.line.id; if (!byLine[k]) { byLine[k] = { line: r.line, vs: [] }; lineOrder.push(k); } byLine[k].vs.push(r.audpc); });
+      body.innerHTML = modeBar + head +
+        '<div style="display:flex;gap:8px;margin-top:10px">' + stcell('개체 수', rows.length) + stcell('평균', r1(mean)) + stcell('표준편차', r1(sd)) + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px">' + stcell('최소', r1(mn)) + stcell('최대', r1(mx)) + stcell('라벨번호', lineOrder.length) + '</div>' +
+        tools +
+        '<div style="max-height:330px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1">' +
+            '<th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 4px;width:50px">개체</th>' +
+            '<th style="text-align:center;padding:7px 4px;width:48px">조사</th><th style="text-align:right;padding:7px 10px;width:84px">AUDPC</th></tr></thead><tbody>' +
+          rows.map(function (r) {
+            return '<tr style="border-top:0.5px solid var(--border)">' +
+              '<td style="padding:6px 9px">' + esc(r.line.label) + (r.line.pedigree ? ' <span style="color:var(--text-muted)">' + esc(r.line.pedigree) + '</span>' : '') + '</td>' +
+              '<td style="padding:6px 4px;text-align:center;color:var(--text-secondary)">' + r.indiv + '</td>' +
+              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? '#B0721A' : 'var(--text-muted)') + '">' + r.n + '</td>' +
+              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:#27500A">' + r1(r.audpc) + '</td></tr>';
+          }).join('') + '</tbody></table></div>' +
+        note +
+        '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-top:16px;margin-bottom:6px">라벨번호별 평균 <span style="color:var(--text-muted);font-weight:400">· 개체 AUDPC 들의 평균</span></div>' +
+        '<div style="max-height:240px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
+          '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1">' +
+            '<th style="text-align:left;padding:7px 9px">라벨번호</th><th style="text-align:center;padding:7px 4px;width:50px">개체</th><th style="text-align:right;padding:7px 10px;width:84px">평균</th></tr></thead><tbody>' +
+          lineOrder.map(function (k) {
+            var o = byLine[k], m = o.vs.reduce(function (a, b) { return a + b; }, 0) / o.vs.length;
+            return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 9px">' + esc(o.line.label) + '</td>' +
+              '<td style="padding:6px 4px;text-align:center;color:var(--text-secondary)">' + o.vs.length + '</td>' +
+              '<td style="padding:6px 10px;text-align:right;font-weight:600">' + r1(m) + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+    }
+    wire();
+    $('apSort').onclick = function () { S.audpcSort = (S.audpcSort === 'val') ? 'line' : 'val'; renderAnBody(); };
+    $('apCsv').onclick = function () { audpcCSV(t, dates, rows, mode); };
+  }
+  function audpcCSV(t, dates, rows, mode) {
+    var g = curGen(), p = projectOf(curProjKey()), isLine = (mode === 'line');
+    var head = ['No.', '과제명', '세대', '라벨번호', '품종명/Pedigree', '반복',
+      isLine ? '쓰인 개체수' : '개체', '형질', '기준', '조사일', '쓰인 조사수', '조사 기간(일)', 'AUDPC'];
+    var out = [head], n = 0, ds = dates.join(' '), basis = isLine ? '라벨번호 평균' : '개체별';
+    rows.forEach(function (r) {
+      out.push([++n, projSaveName(p), r.line.gen || g.label, r.line.label, r.line.pedigree || '', r.line.rep || '',
+        isLine ? r.indivN : r.indiv, t.name, basis, ds, r.n, r.days, Math.round(r.audpc * 1000) / 1000]);
+    });
+    var gn = projGroupName(p);
+    var name = (gn ? gn + '_' : '') + safeName(projSaveName(p)) + '_AUDPC(' + safeName(t.name) + (isLine ? '·라벨평균' : '·개체별') + ')_' + projStamp(p) + '.csv';
+    downloadBlob(new Blob(['﻿' + out.map(csvLine).join('\r\n')], { type: 'text/csv;charset=utf-8' }), name);
+    toast('AUDPC ' + rows.length + (isLine ? '개 라벨번호' : '개체') + ' 내려받음');
   }
   function anGather(t) {
     var g = curGen(), out = [];
@@ -3614,6 +3850,7 @@
     var t = traitById(S.anTrait), body = $('anBody');
     var byLine = anGather(t);
     var total = byLine.reduce(function (a, b) { return a + b.vals.length; }, 0);
+    if (S.anTab === 'audpc') { renderAudpc(body, t); return; }
     if (S.anTab === 'chart') { renderChartPanel(body, t, byLine); return; }
     if (total === 0) { body.innerHTML = '<div style="padding:30px 10px;text-align:center;color:var(--text-muted)">이 형질의 입력값이 없습니다' + ' (' + S.date + ' 조사)' + '<br><span style="font-size:12px">조사 탭에서 값을 입력하면 여기에 통계가 나타납니다.</span></div>'; return; }
     if (isMeasure(t)) renderMeasure(body, t, byLine); else renderCategory(body, t, byLine);
@@ -4848,8 +5085,8 @@
         calls: [gc('cMapWrap', 1)] },
 
       { img: '17-analysis', chap: '분석', title: '형질별 통계 · 계통 순위',
-        body: '<b>①</b> <b>요약 · 통계</b>와 <b>그래프 생성</b> 두 화면<br><b>②</b> <b>분석 대상</b> — 전체 또는 라벨번호를 골라서(일부 선택)<br><b>③</b> <b>형질 탭</b> — 누르면 그 형질의 통계로 바뀝니다',
-        note: '개체수·평균·표준편차·범위·CV%, 분산분석 F·p, 유전력 H², Tukey 평균분리(같은 문자면 유의차 없음)까지 한 화면에서 봅니다.',
+        body: '<b>①</b> <b>요약 · 통계</b> · <b>그래프 생성</b> · <b>AUDPC</b> 세 화면<br><b>②</b> <b>분석 대상</b> — 전체 또는 라벨번호를 골라서(일부 선택)<br><b>③</b> <b>형질 탭</b> — 누르면 그 형질의 통계로 바뀝니다',
+        note: '개체수·평균·표준편차·범위·CV%, 분산분석 F·p, 유전력 H², Tukey 평균분리(같은 문자면 유의차 없음)까지 한 화면에서 봅니다. AUDPC 탭에서는 같은 형질을 여러 날 조사한 경우 원하는 조사일을 골라 개체마다 병 진전 곡선 아래 면적을 구하고 CSV로 내려받을 수 있습니다.',
         calls: [gc('anTabs', 1), gc('anScope', 2), gc('anPills', 3)] },
 
       { img: '18-chart', chap: '분석', title: '그래프 그리고 내려받기',
