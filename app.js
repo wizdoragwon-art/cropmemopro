@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.11.4 17:26';
+  var APP_VERSION = '26.11.5 06:22';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -652,10 +652,10 @@
   }
   function traitOfGen(g, id) { var ts = (g && g.traits) || []; for (var i = 0; i < ts.length; i++) if (ts[i].id === id) return ts[i]; return null; }
   // 과제(프로젝트) 전체 = 모든 세대를 한 파일로
-  async function buildCSV(p) {
+  async function buildCSV(p, allObs) {
     if (p && p.lines != null && p.items) { /* project */ } else if (p && p.traits) { p = projectOf(projKeyOf(p)); }
     if (!p) return null;
-    var all = await obsAll();
+    var all = allObs || await obsAll();          // 백업·내보내기는 한 번 읽은 걸 돌려 쓴다
     var genOf = {}, lineById = {}, lineOrder = {}, seq = 0;
     p.items.forEach(function (it) {
       genOf[it.g.id] = it.g;
@@ -918,10 +918,10 @@
   var XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   var XLSX_MAX_ROWS = 30000;
   // 과제 하나를 조사용 엑셀 야장으로 만든다 → { name, data, rows, cols }
-  async function buildXLSX(p) {
+  async function buildXLSX(p, allObs) {
     if (p && p.lines != null && p.items) { /* project */ } else if (p && p.traits) { p = projectOf(projKeyOf(p)); }
     if (!p || !p.items || !p.items.length) return null;
-    var all = await obsAll();
+    var all = allObs || await obsAll();          // 백업·내보내기는 한 번 읽은 걸 돌려 쓴다
     var genOf = {}; p.items.forEach(function (it) { genOf[it.g.id] = it.g; });
     var recs = all.filter(function (r) { return !!genOf[r.genId]; });
 
@@ -1019,7 +1019,13 @@
 
   async function buildBackupFiles(onStep, sink) {
     cleanFolders();
-    await syncProjDates();                 // 파일 이름에 넣을 '마지막 조사일' 을 최신으로
+    // 조사기록과 사진 목록은 **딱 한 번만** 읽어 과제마다 돌려 쓴다.
+    // 예전에는 과제마다 buildCSV·buildXLSX·collectProjImages 가 각각 전체를 다시 읽어
+    // 과제 수 × 3 번 훑었다(사진은 세대 수만큼 또 훑었다). 과제가 10개면 30번이다.
+    if (onStep) onStep('자료를 읽는 중…', 0.02);
+    var allObs = await obsAll();
+    refreshProjDates(allObs);              // 파일 이름에 넣을 '마지막 조사일' 을 최신으로
+    var phIdx = await photoIndexByGen();
     var ps = projects();
     if (!ps.length) return null;
     var stamp = ymd(), files = [], summary = [], nCsv = 0, nImg = 0, bytes = 0, nFiles = 0;
@@ -1028,13 +1034,13 @@
       if (onStep) onStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + ps.length + '\n' + p.name, (i / ps.length) * 0.85);
       await bkYield();
       var now = Date.now();
-      var built = await buildCSV(p);
+      var built = await buildCSV(p, allObs);
       if (built) { files.push({ name: dir + csvFileName(p, stamp), data: txtBytes(built.csv), mtime: now }); nCsv++; }
-      var xl = await buildXLSX(p);
+      var xl = await buildXLSX(p, allObs);
       if (xl) { files.push({ name: dir + xlsxFileName(p, stamp), data: xl.data, mtime: now }); nCsv++; }
       var lab = buildLabelCSV(p);
       if (lab) { files.push({ name: dir + labelCsvName(p, stamp), data: txtBytes(lab), mtime: now }); nCsv++; }
-      var imgs = await collectProjImages(p);
+      var imgs = await collectProjImages(p, allObs, phIdx);
       for (var j = 0; j < imgs.length; j++) {
         try { files.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts, photo: true }); nImg++; } catch (e) {}
         imgs[j].url = null;   // 데이터URL 원본은 바로 놓아준다(메모리 절약)
@@ -4462,14 +4468,14 @@
 
   // ----- 내보내기 묶음 만들기 (기기 백업과 같은 폴더 구조) -----
   //   opts: { csv, labels, photos } — 담을 것 고르기
-  async function projExportFiles(p, stamp, opts) {
+  async function projExportFiles(p, stamp, opts, allObs, phIdx) {
     var dir = backupPathOf(p), now = Date.now(), out = [], rows = 0, imgs = [];
     if (opts.csv !== false) {
-      var built = await buildCSV(p);
+      var built = await buildCSV(p, allObs);
       if (built) { out.push({ name: dir + csvFileName(p, stamp), data: txtBytes(built.csv), mtime: now }); rows = built.rows; }
     }
     if (opts.xlsx !== false && opts.csv !== false) {
-      var xl = await buildXLSX(p);
+      var xl = await buildXLSX(p, allObs);
       if (xl) out.push({ name: dir + xlsxFileName(p, stamp), data: xl.data, mtime: now });
     }
     if (opts.labels !== false) {
@@ -4477,7 +4483,7 @@
       if (lab) out.push({ name: dir + labelCsvName(p, stamp), data: txtBytes(lab), mtime: now });
     }
     if (opts.photos !== false) {
-      imgs = await collectProjImages(p);
+      imgs = await collectProjImages(p, allObs, phIdx);
       for (var j = 0; j < imgs.length; j++) {
         try { out.push({ name: dir + '사진/' + imgs[j].name, data: dataURLtoBytes(imgs[j].url), mtime: imgs[j].ts, photo: true }); } catch (e) {}
         imgs[j].url = null;
@@ -4489,15 +4495,18 @@
   // 여러 과제를 모아 ZIP 하나로 저장
   async function exportBundle(list, opts, zipName, label) {
     if (!list || !list.length) { toast('내보낼 과제가 없습니다'); return; }
-    await syncProjDates();
-    backupProgress('자료를 모으는 중…');
+    backupProgress('자료를 읽는 중…');
     await bkYield();
     try {
+      // 조사기록·사진 목록은 한 번만 읽어 과제마다 돌려 쓴다 (buildBackupFiles 와 같은 이유)
+      var allObs = await obsAll();
+      refreshProjDates(allObs);
+      var phIdx = await photoIndexByGen();
       var stamp = ymd(), files = [], nPhoto = 0;
       for (var i = 0; i < list.length; i++) {
         bkStep('자료 모으는 중 · 과제 ' + (i + 1) + '/' + list.length + '\n' + list[i].name, (i / list.length) * 0.85);
         await bkYield();
-        var r = await projExportFiles(list[i], stamp, opts);
+        var r = await projExportFiles(list[i], stamp, opts, allObs, phIdx);
         files = files.concat(r.files); nPhoto += r.photos;
       }
       if (!files.length) { closeOverlay(); toast('내보낼 자료가 없습니다'); return; }
@@ -4717,16 +4726,48 @@
     });
   }
 
-  function collectProjImages(p) {
+  /* 사진 목록을 세대별로 한 번에 만든다 (사진 자료는 빼고 이름표만)
+   * photosForGen() 은 부를 때마다 사진 저장소를 처음부터 끝까지 훑으면서 사진 한 장 한 장의
+   * 큰 글자(base64)까지 읽어 온다. 과제·세대 수만큼 되풀이되면 백업이 느려진다.
+   * 그래서 한 번만 훑어 세대별 목록을 만들어 두고, 실제 사진은 쓸 때 id 로 하나씩 꺼낸다.
+   */
+  function photoIndexByGen() {
+    return new Promise(function (res) {
+      var idx = {}, r = os('photos', 'readonly').openCursor();
+      r.onsuccess = function (e) {
+        var c = e.target.result;
+        if (c) {
+          var v = c.value;
+          (idx[v.genId] = idx[v.genId] || []).push({
+            id: v.id, genId: v.genId, lineId: v.lineId, indiv: v.indiv,
+            traitId: v.traitId, traitName: v.traitName, date: v.date,
+            createdAt: v.createdAt, updatedAt: v.updatedAt
+          });
+          c.continue();
+        } else {
+          Object.keys(idx).forEach(function (k) { idx[k].sort(function (a, b) { return a.createdAt - b.createdAt; }); });
+          res(idx);
+        }
+      };
+      r.onerror = function () { res(idx); };
+    });
+  }
+  function collectProjImages(p, allObs, phIdx) {
     p = p || projectOf(curProjKey());
     var items = (p && p.items) || [];
     var out = [], used = {};
     function push(name, dataUrl, ts) { var n = name, c = 2; while (used[n]) { n = name.replace(/\.jpg$/, '') + '(' + (c++) + ').jpg'; } used[n] = 1; out.push({ name: n, url: dataUrl, ts: ts || Date.now() }); }
     var seq = Promise.resolve();
     items.forEach(function (it) {
-      seq = seq.then(function () { return photosForGen(it.g.id); }).then(function (ps) { ps.forEach(function (ph) { push(photoFileName(it.g, ph), ph.anno || ph.orig, ph.updatedAt || ph.createdAt); }); });
+      seq = seq.then(function () {
+        if (!phIdx) return photosForGen(it.g.id);                    // 예전 방식 (한 과제만 다룰 때)
+        var metas = phIdx[it.g.id] || [], got = [];
+        return metas.reduce(function (q, m) {
+          return q.then(function () { return photoGet(m.id); }).then(function (ph) { if (ph) got.push(ph); });
+        }, Promise.resolve()).then(function () { return got; });
+      }).then(function (ps) { ps.forEach(function (ph) { push(photoFileName(it.g, ph), ph.anno || ph.orig, ph.updatedAt || ph.createdAt); }); });
     });
-    return seq.then(function () { return obsAll(); }).then(function (all) {
+    return seq.then(function () { return allObs || obsAll(); }).then(function (all) {
       items.forEach(function (it) {
         var lineById = {}; it.g.lines.forEach(function (l) { lineById[l.id] = l; });
         all.forEach(function (r) {
