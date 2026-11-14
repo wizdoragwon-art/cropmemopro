@@ -156,7 +156,7 @@ a{color:var(--green-d)}
 .gx{width:28px;height:28px;border:0;background:var(--surface-1);border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .gshot{flex:1 1 auto;min-height:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:12px;overflow:hidden}
 .gframe{position:relative;height:100%;aspect-ratio:412/892;border-radius:11px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.16);background:#fff}
-.gframe img{width:100%;height:100%;display:block;object-fit:cover;object-position:top}
+.gframe img{width:100%;height:100%;display:block;object-fit:cover;object-position:top;-webkit-user-drag:none;user-select:none;-webkit-user-select:none}
 .ghl{position:absolute;border:2.5px solid var(--green);border-radius:9px;animation:gpulse 1.7s ease-in-out infinite}
 @keyframes gpulse{0%,100%{box-shadow:0 0 0 3px rgba(99,153,34,.20)}50%{box-shadow:0 0 0 7px rgba(99,153,34,.07)}}
 .gbadge{position:absolute;width:21px;height:21px;border-radius:50%;background:var(--green);color:#fff;font-size:12px;font-weight:700;

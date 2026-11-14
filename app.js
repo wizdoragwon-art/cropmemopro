@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.11.5 16:57';
+  var APP_VERSION = '26.11.6 07:01';
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -5088,7 +5088,7 @@
     return [
       { img: '01-home', chap: '시작', title: '반갑습니다. Crop Memo Pro 사용 가이드 입니다.',
         body: '인터넷이 없는 필드에서도 야장을 기록·분석하고, 연결되면 시트·드라이브로 자동 전송됩니다.',
-        note: '설치 직후에는 둘러보기용 예시 과제가 하나 들어 있습니다. 필요 없으면 지우고 새로 만드세요. 홈 제목 아래 버전정보는 앱을 고친 날짜와 시각입니다.' },
+        note: '화면을 좌우로 밀거나 아래 다음·이전 버튼으로 넘깁니다. 설치 직후에는 둘러보기용 예시 과제가 하나 들어 있습니다. 필요 없으면 지우고 새로 만드세요. 홈 제목 아래 버전정보는 앱을 고친 날짜와 시각입니다.' },
 
       { img: '01-home', chap: '과제 만들기', title: '새 폴더 · 새 과제 · 불러오기',
         body: '<b>①</b> <b>새 폴더</b> — 과제를 묶어 둘 모음 폴더를 먼저 만듭니다<br><b>②</b> <b>+ 새 과제</b> — 3단계로 새 과제를 만듭니다<br><b>③</b> <b>불러오기</b> — 기기에 백업해 둔 과제를 되살립니다',
@@ -5222,7 +5222,7 @@
       ? '<div class="gend"><div class="gendic">' + ico('circle-check', '#fff', 40) + '</div>' +
         '<div class="gendttl">준비 완료</div>' +
         '<div class="gendmsg">언제든 <b>설정 → 사용 가이드 다시 보기</b>에서<br>이 안내를 다시 볼 수 있습니다.</div></div>'
-      : '<div class="gshot"><div class="gframe' + (s.doc ? ' gdoc' : '') + '" id="gShot"><img src="guide/' + s.img + '.jpg" alt="">' +
+      : '<div class="gshot"><div class="gframe' + (s.doc ? ' gdoc' : '') + '" id="gShot"><img src="guide/' + s.img + '.jpg" alt="" draggable="false">' +
         (s.calls || []).map(guideCallHTML).join('') +
         (s.swipe ? '<div class="gswh">◀ 개체 ▶</div><div class="gswv">▲ 라벨번호 ▼</div>' : '') +
         '<div class="gzhint">' + ico('search', '#fff', 12) + ' 탭하면 크게</div>' +
@@ -5252,15 +5252,50 @@
     if ($('gDone')) $('gDone').onclick = function () { closeGuide(false); kvSet('guideSeen', !!G.hide); toast(G.hide ? '가이드를 닫았습니다 · 설정에서 다시 볼 수 있어요' : '다음 실행 때 다시 안내합니다'); };
     $('gClose').onclick = function () { closeGuide(true); };
     o.querySelectorAll('.gdot').forEach(function (d) { d.onclick = function () { G.i = +d.getAttribute('data-k'); renderGuide(); }; });
-    if ($('gShot')) $('gShot').onclick = function (e) { e.stopPropagation(); openGuideZoom('guide/' + s.img + '.jpg', s.title); };
-    // 좌우 스와이프로 넘기기
-    var sx = null, sy = null;
-    o.onpointerdown = function (e) { sx = e.clientX; sy = e.clientY; };
-    o.onpointerup = function (e) {
-      if (sx == null) return;
-      var dx = e.clientX - sx, dy = e.clientY - sy; sx = null;
-      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) guideGo(dx < 0 ? 1 : -1);
+    if ($('gShot')) $('gShot').onclick = function (e) {
+      e.stopPropagation();
+      if (G.swiped) { G.swiped = false; return; }        // 밀어서 넘긴 것이면 확대하지 않는다
+      openGuideZoom('guide/' + s.img + '.jpg', s.title);
     };
+    attachGuideSwipe(o.querySelector('.gcard') || o);
+  }
+  /* 가이드 좌우로 밀어 넘기기
+   *   pointerup 만 보던 예전 방식은 휴대폰에서 동작하지 않았다. 손가락을 옆으로 밀면 브라우저가
+   *   스크롤로 가로채 pointercancel 로 끝나 버려 pointerup 이 오지 않기 때문이다.
+   *   그래서 touch 이벤트로 직접 받고, 가로로 움직인 것이 확실해지면 preventDefault 로 붙잡는다.
+   *   (세로로 미는 것은 그대로 두어 글이 긴 장은 계속 스크롤된다)
+   */
+  function attachGuideSwipe(el) {
+    if (!el) return;
+    el.style.touchAction = 'pan-y';
+    el.addEventListener('dragstart', function (e) { e.preventDefault(); });   // 그림 끌어놓기가 스와이프를 끊지 않게
+    var x0 = null, y0 = null, dir = null, t0 = 0;
+    function start(x, y) { x0 = x; y0 = y; dir = null; t0 = Date.now(); if (S.guide) S.guide.swiped = false; }
+    function move(x, y, e) {
+      if (x0 == null) return;
+      var dx = x - x0, dy = y - y0;
+      if (!dir && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) dir = (Math.abs(dx) > Math.abs(dy)) ? 'h' : 'v';
+      if (dir === 'h' && e && e.cancelable) e.preventDefault();
+    }
+    function end(x, y) {
+      if (x0 == null) return;
+      var dx = x - x0, dy = y - y0, dt = Date.now() - t0;
+      x0 = null;
+      if (dir !== 'h' || dt > 900) return;
+      if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+      // 실제로 넘어갔을 때만 뒤따라 오는 클릭(확대)을 막는다 (진동은 guideGo 가 울린다)
+      var moved = guideGo(dx < 0 ? 1 : -1);
+      if (moved && S.guide) S.guide.swiped = true;
+    }
+    el.addEventListener('touchstart', function (e) { var t = e.touches[0]; if (t) start(t.clientX, t.clientY); }, { passive: true });
+    el.addEventListener('touchmove', function (e) { var t = e.touches[0]; if (t) move(t.clientX, t.clientY, e); }, { passive: false });
+    el.addEventListener('touchend', function (e) { var t = e.changedTouches && e.changedTouches[0]; if (t) end(t.clientX, t.clientY); }, { passive: true });
+    el.addEventListener('touchcancel', function () { x0 = null; });
+    // 마우스(데스크톱)에서도 끌어서 넘길 수 있게
+    el.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') return; start(e.clientX, e.clientY); });
+    el.addEventListener('pointermove', function (e) { if (e.pointerType === 'touch') return; move(e.clientX, e.clientY, null); });
+    el.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') return; end(e.clientX, e.clientY); });
+    el.addEventListener('pointercancel', function () { x0 = null; });
   }
   // 가이드 그림 확대해서 보기 — 탭하면 커지고, ＋ / － 로 단계 조절
   var GZ_STEPS = [100, 150, 220, 320, 460];
@@ -5297,11 +5332,12 @@
     z.addEventListener('click', function (e) { if (e.target === z || e.target === body) z.remove(); });
   }
   function guideGo(d) {
-    var G = S.guide; if (!G) return;
+    var G = S.guide; if (!G) return false;
     var ni = G.i + d;
-    if (ni < 0 || ni >= G.slides.length) return;
+    if (ni < 0 || ni >= G.slides.length) return false;    // 맨 앞·맨 뒤에서는 그대로
     G.i = ni; haptic(10); renderGuide();
     var c = document.querySelector('#guideOvl .gcard'); if (c) c.scrollTop = 0;
+    return true;
   }
 
 
