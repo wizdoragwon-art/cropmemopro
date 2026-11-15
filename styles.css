@@ -272,3 +272,27 @@ html[data-theme="dark"]{
   --te-thumb:#4E6B2E;--te-thumb-on:#7FB83B;--shot-dim:brightness(.9);--cs:dark;
   --field-bg:var(--surface-1);
 }
+
+/* ===== 아래 탭 전환 — 좌우로 밀기 (26.11.15) =====
+   누른 탭이 오른쪽이면 오른쪽에서, 왼쪽이면 왼쪽에서 들어온다.
+   아래 탭바는 따로 떼어 두어 화면과 같이 밀리지 않는다.
+   '움직임 줄이기'를 켠 기기에서는 app.js 가 아예 걸지 않는다. */
+#tabbar{view-transition-name:cmTabbar}
+html.cm-sliding::view-transition-image-pair(root){isolation:auto}
+/* 아래 탭바는 흐려지지 않고 그 자리에서 바로 바뀐다 (겹쳐 보이면 더 어수선하다) */
+html.cm-sliding::view-transition-group(cmTabbar){animation-duration:.01s}
+html.cm-sliding::view-transition-old(cmTabbar){display:none}
+html.cm-sliding::view-transition-new(cmTabbar){animation:none;mix-blend-mode:normal}
+html.cm-sliding::view-transition-group(root){animation-duration:.22s}
+html.cm-sliding::view-transition-old(root),
+html.cm-sliding::view-transition-new(root){
+  mix-blend-mode:normal;animation-duration:.22s;animation-fill-mode:both;
+  animation-timing-function:cubic-bezier(.32,.72,0,1)}
+html.cm-sliding::view-transition-old(root){animation-name:cmSlideOut}
+html.cm-sliding::view-transition-new(root){animation-name:cmSlideIn}
+html.cm-sliding.cm-back::view-transition-old(root){animation-name:cmSlideOutBack}
+html.cm-sliding.cm-back::view-transition-new(root){animation-name:cmSlideInBack}
+@keyframes cmSlideIn{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@keyframes cmSlideOut{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+@keyframes cmSlideInBack{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+@keyframes cmSlideOutBack{from{transform:translateX(0)}to{transform:translateX(100%)}}

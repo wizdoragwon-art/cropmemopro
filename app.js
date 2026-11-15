@@ -5,7 +5,7 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.11.15 20:23';
+  var APP_VERSION = '26.11.15 21:18';
 
   /* ===== 화면 색 — 자동(휴대폰 설정) · 밝게 · 어둡게 ===== */
   var THEME_KEY = 'cmTheme';
@@ -1276,9 +1276,32 @@
   }
 
   // ---------- routing ----------
+  /* ===== 아래 탭 전환 — 좌우로 밀기 =====
+     누른 탭이 오른쪽이면 오른쪽에서, 왼쪽이면 왼쪽에서 들어온다.
+     아래 탭바(#tabbar)는 따로 떼어 두어 같이 밀리지 않는다(styles.css).
+     브라우저가 못 하면(View Transitions 미지원) 지금처럼 바로 바뀐다. */
+  var TAB_ORDER = ['home', 'collect', 'analysis', 'export', 'settings'];
+  var navSeq = 0;
+  function navSlide(from, to, run) {
+    var i = TAB_ORDER.indexOf(from), j = TAB_ORDER.indexOf(to);
+    var ok = (i >= 0 && j >= 0 && i !== j && typeof document.startViewTransition === 'function');
+    try { if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) ok = false; } catch (e) {}
+    if (!ok) { run(); return; }
+    var root = document.documentElement, my = ++navSeq;
+    root.classList.add('cm-sliding');
+    root.classList.toggle('cm-back', j < i);
+    function end() { if (my === navSeq) root.classList.remove('cm-sliding', 'cm-back'); }
+    try {
+      var t = document.startViewTransition(run);
+      if (t && t.finished && t.finished.then) t.finished.then(end, end); else end();
+    } catch (e) { end(); run(); }
+  }
   function go(view) {
     if ((view === 'collect' || view === 'export' || view === 'analysis' || view === 'ocr' || view === 'photo' || view === 'draw' || view === 'voice') && !S.gens.length) view = 'home';
     if (view !== 'collect') { S.traitEdit = false; S.traitEditFrom = null; }
+    navSlide(S.view, view, function () { goNow(view); });
+  }
+  function goNow(view) {
     S.view = view;
     ['home', 'collect', 'export', 'settings', 'new', 'genedit', 'analysis', 'bulk', 'ocr', 'photo', 'draw', 'voice', 'write', 'signup'].forEach(function (v) {
       $('view-' + v).classList.toggle('on', v === view);
@@ -1377,7 +1400,7 @@
     });
   }
   function yy() { return String(new Date().getFullYear()).slice(-2); }
-  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: yy(), prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '', extraTraits: [], baseTraits: null, loadedFrom: null }; go('new'); }
+  function startNew() { S.wiz = { step: 1, name: '', crop: '오이', prefix: '', prefixEdited: false, goal: '', gens: ['F3'], lines: 24, indiv: 10, zone: 'A동', rcbd: true, reps: 3, traitOff: {}, crops: WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color, prefix: c.prefix }; }), adding: false, nc: { name: '', prefix: '' }, src: 'auto', rows: null, fileName: '', extraTraits: [], baseTraits: null, loadedFrom: null }; go('new'); }
 
   function renderNew() {
     var w = S.wiz; if (!w) { startNew(); return; }
@@ -1405,7 +1428,7 @@
       '<input class="ein" id="wName" style="margin-top:6px" placeholder="예) 오이 내병성 육종" value="' + esc(w.name) + '">' +
       '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:8px">' + chips + '</div>' + addForm +
-      '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">라벨 접두어 <span style="color:var(--text-muted);font-weight:400">(연도 · 모든 작물 공통)</span></label>' +
+      '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">라벨 접두어 <span style="color:var(--text-muted);font-weight:400">(연도 · 모든 작물 공통 · 비워 두면 ' + yy() + ')</span></label>' +
       '<input class="ein" id="wPre" style="width:120px;text-align:center;font-size:16px;font-weight:600" placeholder="' + yy() + '" value="' + esc(w.prefix) + '">' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">' + ico('info-circle', 'var(--text-muted)', 13) + ' 라벨번호 예시: <b id="wPrePrev">' + esc(w.prefix || yy()) + '</b>-#### <span style="color:var(--text-muted)">(#### = 라벨·엑셀 값 그대로, 자릿수 고정 아님)</span></div>' +
       '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin:14px 0 6px">목표 · 설명 (선택)</label>' +
@@ -1495,7 +1518,7 @@
       '<div style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700">' + active + '</div><div style="font-size:11px;color:var(--text-muted)">형질</div></div></div>';
   }
   function wizBlock(w) {
-    if (w.step === 1) { if (!(w.name || '').trim()) return '과제명을 입력하세요.'; if (!w.crop) return '작물을 선택하세요.'; if (!(w.prefix || '').trim()) return '라벨 접두어(연도)를 입력하세요.'; }
+    if (w.step === 1) { if (!(w.name || '').trim()) return '과제명을 입력하세요.'; if (!w.crop) return '작물을 선택하세요.'; }
     if (w.step === 2) {
       if (w.src === 'file') {
         if (!w.rows || !w.rows.length) return '엑셀·CSV 파일을 선택하세요.';
@@ -1591,14 +1614,14 @@
         });
       } else {
         for (var i = 0; i < w.lines; i++) {
-          var n = String(i + 1).padStart(4, '0'), lab = w.prefix + '-' + n;
+          var n = String(i + 1).padStart(4, '0'), lab = (w.prefix || yy()) + '-' + n;
           for (var rp2 = 1; rp2 <= reps; rp2++) {
             lines.push({ id: 'L' + String(i + 1).padStart(3, '0') + '_R' + rp2, label: lab, rep: rp2, block: w.rcbd ? ('B-' + rp2) : '', zone: w.zone, row: Math.floor(lines.length / 10) + 1, col: (lines.length % 10) + 1, indivTotal: w.indiv, selected: false });
           }
         }
       }
       if (!lines.length) return;
-      newGens.push({ id: 'G' + base + '_' + gi, projId: 'P' + base, projName: w.name, crop: w.crop, color: (meta && meta.color) || '#639922', label: gl, prefix: w.prefix, surveyDates: [todayStr()], traits: traits, lines: lines });
+      newGens.push({ id: 'G' + base + '_' + gi, projId: 'P' + base, projName: w.name, crop: w.crop, color: (meta && meta.color) || '#639922', label: gl, prefix: (w.prefix || yy()), surveyDates: [todayStr()], traits: traits, lines: lines });
     });
     if (!newGens.length) { toast('등록할 계통이 없습니다'); return; }
     S.gens = newGens.concat(S.gens);
