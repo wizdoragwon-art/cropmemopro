@@ -5,7 +5,31 @@
 
   // ===== 버전 =====
   // 앱을 업데이트할 때 이 날짜만 바꾸면 홈 화면의 버전정보가 갱신됩니다. (형식: 연.월.일 — 26.8.8 = 2026년 8월 8일)
-  var APP_VERSION = '26.11.6 07:01';
+  var APP_VERSION = '26.11.15 20:23';
+
+  /* ===== 화면 색 — 자동(휴대폰 설정) · 밝게 · 어둡게 ===== */
+  var THEME_KEY = 'cmTheme';
+  function themeMode() { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; } }
+  function themeIsDark() {
+    var m = themeMode();
+    if (m === 'dark') return true;
+    if (m === 'light') return false;
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch (e) { return false; }
+  }
+  function applyTheme(mode) {
+    if (mode) { try { localStorage.setItem(THEME_KEY, mode); } catch (e) {} }
+    document.documentElement.setAttribute('data-theme', themeMode());
+    var m = document.querySelector('meta[name="theme-color"]');
+    if (m) m.setAttribute('content', themeIsDark() ? '#0C0F0B' : '#639922');
+  }
+  try {
+    var _mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var _onMq = function () { if (themeMode() === 'auto') applyTheme(); };
+    if (_mq.addEventListener) _mq.addEventListener('change', _onMq);
+    else if (_mq.addListener) _mq.addListener(_onMq);
+  } catch (e) {}
+  applyTheme();
+
 
   // ---------- IndexedDB ----------
   var DB = null, DB_NAME = 'cropmemo', DB_VER = 2;
@@ -282,7 +306,7 @@
       '<div class="ovl-title">' + (isNew ? '폴더 만들기' : '폴더 이름 수정') + '</div>' +
       '<div class="ovl-msg">폴더 이름을 입력하세요.</div>' +
       '<input class="ein" id="fdName" style="margin-top:12px;font-size:15px" value="' + esc(f.name) + '">' +
-      '<div class="ovl-btns">' + (isNew ? '' : '<button class="btn" id="fdDel" style="color:#C0392B;border-color:#E3B4AE">폴더 해제</button>') +
+      '<div class="ovl-btns">' + (isNew ? '' : '<button class="btn" id="fdDel" style="color:var(--danger);border-color:var(--danger-br)">폴더 해제</button>') +
       '<button class="btn" id="fdCancel">취소</button><button class="btn primary" id="fdOk">저장</button></div>'
     );
     var inp = $('fdName'); try { inp.focus(); inp.select(); } catch (e) {}
@@ -1155,7 +1179,7 @@
   // ----- 진행 표시 -----
   function backupProgress(msg) {
     var o = openOverlay(
-      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 기기 백업</div>' +
+      '<div class="ovl-title">' + ico('device-floppy', 'var(--green-d)', 18) + ' 기기 백업</div>' +
       '<div class="ovl-msg" id="bkMsg" style="white-space:pre-line;min-height:38px">' + esc(msg) + '</div>' +
       '<div style="height:8px;border-radius:6px;background:var(--surface-1);overflow:hidden;margin-top:12px"><div id="bkBar" style="height:100%;width:4%;background:var(--green);transition:width .25s"></div></div>' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">사진이 많으면 시간이 걸립니다. 끝날 때까지 기다려 주세요.</div>'
@@ -1363,10 +1387,10 @@
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)">' +
         '<button class="btn" id="wClose" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('x', 'var(--text-primary)', 18) + '</button>' +
         '<div style="flex:1"><div style="font-size:15px;font-weight:600">새 과제 생성</div><div style="font-size:11px;color:var(--text-muted)">' + w.step + ' / 3 · ' + names[w.step - 1] + '</div></div></div>' +
-      '<div style="display:flex;gap:6px;padding:12px 14px 4px">' + [1, 2, 3].map(function (n) { return '<div style="flex:1;text-align:center"><div style="height:5px;border-radius:3px;background:' + (n <= w.step ? '#639922' : 'var(--border)') + '"></div><div style="font-size:10px;margin-top:5px;color:' + (n === w.step ? '#27500A' : 'var(--text-muted)') + '">' + n + '. ' + names[n - 1] + '</div></div>'; }).join('') + '</div>' +
+      '<div style="display:flex;gap:6px;padding:12px 14px 4px">' + [1, 2, 3].map(function (n) { return '<div style="flex:1;text-align:center"><div style="height:5px;border-radius:3px;background:' + (n <= w.step ? 'var(--green)' : 'var(--border)') + '"></div><div style="font-size:10px;margin-top:5px;color:' + (n === w.step ? 'var(--green-ink)' : 'var(--text-muted)') + '">' + n + '. ' + names[n - 1] + '</div></div>'; }).join('') + '</div>' +
       '<div style="flex:1;padding:8px 16px 12px;overflow:auto" id="wBody">' + body + '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
-        '<div id="wHint" style="font-size:11px;color:#B0721A;margin-bottom:8px;display:none"></div>' +
+        '<div id="wHint" style="font-size:11px;color:var(--amber);margin-bottom:8px;display:none"></div>' +
         (w.step === 3 ? wizSummary(w) : '') +
         '<div style="display:flex;gap:10px">' + (w.step > 1 ? '<button class="btn" id="wPrev" style="flex:0 0 90px;height:48px;font-size:14px">이전</button>' : '') +
           '<button class="btn primary" id="wNext" style="flex:1;height:48px;font-size:15px">' + (w.step < 3 ? '다음' : '과제 생성') + '</button></div></div>';
@@ -1376,7 +1400,7 @@
   function stepInfo(w) {
     var chips = w.crops.map(function (c) { return '<button class="pill wcrop' + (c.name === w.crop ? ' on' : '') + '" data-c="' + esc(c.name) + '"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + c.color + ';margin-right:5px"></span>' + esc(c.name) + '</button>'; }).join('');
     chips += '<button class="pill" id="wAddCrop" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 작물 추가</button>';
-    var addForm = w.adding ? ('<div class="card" style="margin-top:10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('plant-2', '#639922', 14) + ' 작물 추가</div><div style="display:flex;gap:8px"><div style="flex:2"><label style="font-size:11px;color:var(--text-secondary)">작물명</label><input class="ein" id="wNcName" style="margin-top:4px" placeholder="예) 양파" value="' + esc(w.nc.name) + '"></div><div style="flex:1"><label style="font-size:11px;color:var(--text-secondary)">접두어</label><input class="ein" id="wNcPre" style="margin-top:4px;text-transform:uppercase" placeholder="예) ON" value="' + esc(w.nc.prefix) + '"></div></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wNcCancel" style="flex:0 0 80px;height:38px;font-size:13px">취소</button><button class="btn primary" id="wNcAdd" style="flex:1;height:38px;font-size:13px">추가하고 선택</button></div></div>') : '';
+    var addForm = w.adding ? ('<div class="card" style="margin-top:10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('plant-2', 'var(--green)', 14) + ' 작물 추가</div><div style="display:flex;gap:8px"><div style="flex:2"><label style="font-size:11px;color:var(--text-secondary)">작물명</label><input class="ein" id="wNcName" style="margin-top:4px" placeholder="예) 양파" value="' + esc(w.nc.name) + '"></div><div style="flex:1"><label style="font-size:11px;color:var(--text-secondary)">접두어</label><input class="ein" id="wNcPre" style="margin-top:4px;text-transform:uppercase" placeholder="예) ON" value="' + esc(w.nc.prefix) + '"></div></div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wNcCancel" style="flex:0 0 80px;height:38px;font-size:13px">취소</button><button class="btn primary" id="wNcAdd" style="flex:1;height:38px;font-size:13px">추가하고 선택</button></div></div>') : '';
     return '<label style="font-size:12px;color:var(--text-secondary);font-weight:500">과제명</label>' +
       '<input class="ein" id="wName" style="margin-top:6px" placeholder="예) 오이 내병성 육종" value="' + esc(w.name) + '">' +
       '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">작물</div>' +
@@ -1388,13 +1412,13 @@
       '<textarea class="ein" id="wGoal" style="height:64px;padding:9px 12px;resize:none" placeholder="예) 노균병·흰가루병 복합저항 계통 육성">' + esc(w.goal) + '</textarea>';
   }
   function stepGen(w) {
-    var reps = w.rcbd ? ('<div style="display:flex;align-items:center;gap:8px;margin-top:12px"><span style="font-size:12px;color:var(--text-secondary)">반복 수</span>' + [2, 3, 4].map(function (n) { return '<button class="btn wrep" data-n="' + n + '" style="width:44px;height:34px;font-size:14px' + (n === w.reps ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + n + '</button>'; }).join('') + '</div>') : '';
+    var reps = w.rcbd ? ('<div style="display:flex;align-items:center;gap:8px;margin-top:12px"><span style="font-size:12px;color:var(--text-secondary)">반복 수</span>' + [2, 3, 4].map(function (n) { return '<button class="btn wrep" data-n="' + n + '" style="width:44px;height:34px;font-size:14px' + (n === w.reps ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + n + '</button>'; }).join('') + '</div>') : '';
     var tabs = '<div style="display:flex;gap:8px;margin-bottom:12px">' +
-      '<button class="btn wsrc" data-s="auto" style="flex:1;height:46px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px' + (w.src === 'auto' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + ico('layout-grid', w.src === 'auto' ? '#3B6D11' : 'var(--text-secondary)', 16) + ' 시험구 임의 생성</button>' +
-      '<button class="btn wsrc" data-s="file" style="flex:1;height:46px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px' + (w.src === 'file' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + ico('table', w.src === 'file' ? '#3B6D11' : 'var(--text-secondary)', 16) + ' 엑셀·CSV 등록</button></div>';
+      '<button class="btn wsrc" data-s="auto" style="flex:1;height:46px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px' + (w.src === 'auto' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + ico('layout-grid', w.src === 'auto' ? 'var(--green-d)' : 'var(--text-secondary)', 16) + ' 시험구 임의 생성</button>' +
+      '<button class="btn wsrc" data-s="file" style="flex:1;height:46px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px' + (w.src === 'file' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + ico('table', w.src === 'file' ? 'var(--green-d)' : 'var(--text-secondary)', 16) + ' 엑셀·CSV 등록</button></div>';
     var bodyHtml;
     if (w.src === 'auto') {
-      var gc = wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') +
+      var gc = wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', 'var(--green-ink)', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') +
         '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button>';
       bodyHtml = '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">세대 <span style="color:var(--text-muted);font-weight:400">(중복 선택 · <b>F#</b>은 세대를 모를 때 쓰는 범용 표기)</span></div>' +
         '<div style="display:flex;flex-wrap:wrap;gap:8px">' + gc + '</div>' +
@@ -1404,17 +1428,17 @@
       if (w.rows && w.rows.length) {
         var prev = w.rows.slice(0, 8);
         bodyHtml = '<div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">' + esc(w.fileName) + ' · <b style="color:var(--text-primary)">' + w.rows.length + '개</b> 라벨 인식' + (w.rows.length > 8 ? ' (앞 8개)' : '') + '</div>' +
-          (w.fromOCR ? '<div style="font-size:11px;color:#8A5A12;background:#FAEEDA;border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.5">' + ico('info-circle', '#B0721A', 12) + ' 사진·스캔에서 인식한 결과입니다. 라벨이 맞는지 확인하세요(0↔O, 1↔I 혼동 주의). 등록 후 과제 수정 화면에서 고칠 수 있습니다.</div>' : '') +
+          (w.fromOCR ? '<div style="font-size:11px;color:var(--amber-ink);background:var(--amber-bg);border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.5">' + ico('info-circle', 'var(--amber)', 12) + ' 사진·스캔에서 인식한 결과입니다. 라벨이 맞는지 확인하세요(0↔O, 1↔I 혼동 주의). 등록 후 과제 수정 화면에서 고칠 수 있습니다.</div>' : '') +
           '<div style="overflow:auto;border:0.5px solid var(--border);border-radius:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1)"><th style="text-align:left;padding:6px 9px">#</th><th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:left;padding:6px 9px">품종명/Pedigree</th><th style="text-align:center;padding:6px 9px">세대</th><th style="text-align:center;padding:6px 9px">반복</th><th style="text-align:center;padding:6px 9px">개체</th></tr></thead><tbody>' +
           prev.map(function (r, i) { return '<tr style="border-top:0.5px solid var(--border)"><td style="padding:5px 9px;color:var(--text-muted)">' + (i + 1) + '</td><td style="padding:5px 9px;font-weight:500">' + esc(r.label) + '</td><td style="padding:5px 9px;color:var(--text-secondary)">' + esc(r.pedigree || '-') + '</td><td style="padding:5px 9px;text-align:center">' + esc(r.gen || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.rep || '-') + '</td><td style="padding:5px 9px;text-align:center">' + (r.indiv || '-') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
           '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="wFileReset" style="flex:0 0 100px;height:40px;font-size:13px">다시 선택</button><div style="flex:1;display:flex;align-items:center;font-size:11px;color:var(--text-muted)">세대 열이 없으면 아래 세대로 등록됩니다</div></div>' +
-          (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', '#27500A', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') + '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div></div>') +
+          (wizFileGens(w).length ? '' : '<div style="margin-top:10px"><div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">등록할 세대</div><div style="display:flex;flex-wrap:wrap;gap:8px">' + wizGenChoices(w).map(function (g) { var on = w.gens.indexOf(g) >= 0; return '<button class="pill wgen' + (on ? ' on' : '') + '" data-g="' + esc(g) + '">' + (on ? ico('check', 'var(--green-ink)', 13) + ' ' : '') + esc(g) + '</button>'; }).join('') + '<button class="pill" id="wGenAdd" style="border-style:dashed">' + ico('plus', 'var(--text-secondary)', 13) + ' 직접 입력</button></div></div>') +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">개체 수가 없는 행은 <b>' + w.indiv + '</b>개로 등록됩니다. <input class="ein" id="wIndiv" type="number" style="width:70px;height:32px;display:inline-block;vertical-align:middle;margin-left:4px" value="' + w.indiv + '"></div>';
       } else {
-        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
+        bodyHtml = '<div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', 'var(--green)', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄 머리글, 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
           '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,품종명/Pedigree,세대,반복,개체수\n' + esc(w.prefix || yy()) + '-0001,금강/IT12345,F3,1,10\n' + esc(w.prefix || yy()) + '-0002,새금강/IT12346,F3,2,10</div></div>' +
           '<button class="btn" id="wTpl" style="width:100%;height:44px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
-          '<button class="btn primary" id="wPick" style="width:100%;height:50px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
+          '<button class="btn primary" id="wPick" style="width:100%;height:50px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', 'var(--on-green)', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
           '<button class="btn" id="wShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +
           '<input type="file" id="wFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" style="display:none">' +
           '<input type="file" id="wCam" accept="image/*" capture="environment" style="display:none">' +
@@ -1437,13 +1461,13 @@
     var types = [['numeric', '수치형'], ['ratio', '비율(%)'], ['rating', '등급'], ['counter', '카운터'], ['categorical', '항목형'], ['date', '날짜형'], ['text', '문자형']];
     var extras = (w.extraTraits || []).map(function (t, i) {
       var opts2 = types.map(function (tp) { return '<option value="' + tp[0] + '"' + (t.type === tp[0] ? ' selected' : '') + '>' + tp[1] + '</option>'; }).join('');
-      return '<div class="card" style="margin-bottom:8px;border:0.5px solid #CFE0BA;background:#F7FAF2">' +
-        '<div style="display:flex;gap:8px;align-items:center"><input class="ein wT-name" data-i="' + i + '" style="flex:1;height:38px" placeholder="형질명" value="' + esc(t.name) + '"><button class="btn wT-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('trash', '#C0392B', 15) + '</button></div>' +
+      return '<div class="card" style="margin-bottom:8px;border:0.5px solid var(--green-tbr);background:var(--surface-1)">' +
+        '<div style="display:flex;gap:8px;align-items:center"><input class="ein wT-name" data-i="' + i + '" style="flex:1;height:38px" placeholder="형질명" value="' + esc(t.name) + '"><button class="btn wT-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:var(--danger);border-color:var(--danger-br);display:flex;align-items:center;justify-content:center">' + ico('trash', 'var(--danger)', 15) + '</button></div>' +
         '<div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein wT-type" data-i="' + i + '" style="flex:1;height:38px">' + opts2 + '</select></div>' +
         teConfig(t, i, 'wT') + '</div>';
     }).join('');
     return '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:6px"><b>' + esc(w.crop) + ' · ' + wizGenList(w).join('·') + '</b> 형질세트 · 필요없는 항목은 끄세요</div>' +
-      (w.loadedFrom ? '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:#3B6D11;background:#EAF3DE;border-radius:8px;padding:7px 10px;margin-bottom:8px"><span style="flex:1">' + ico('download', '#3B6D11', 12) + ' 불러온 형질세트 · <b>' + esc(w.loadedFrom) + '</b></span><button class="btn" id="wTReset" style="height:26px;padding:0 8px;font-size:11px">기본으로</button></div>' : '') +
+      (w.loadedFrom ? '<div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--green-d);background:var(--green-t);border-radius:8px;padding:7px 10px;margin-bottom:8px"><span style="flex:1">' + ico('download', 'var(--green-d)', 12) + ' 불러온 형질세트 · <b>' + esc(w.loadedFrom) + '</b></span><button class="btn" id="wTReset" style="height:26px;padding:0 8px;font-size:11px">기본으로</button></div>' : '') +
       '<div>' + rows + '</div>' +
       (extras ? '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin:14px 0 6px">추가한 형질</div>' + extras : '') +
       '<div style="display:flex;gap:8px;margin-top:10px">' +
@@ -1465,9 +1489,9 @@
       w._plots = plotsPerGen * (byFile ? 1 : nG);
     } else { labels = w.lines * nG; indivs = w.lines * w.indiv * nG * reps; w._plots = w.lines * reps * nG; }
     return '<div style="display:flex;gap:8px;margin-bottom:8px">' +
-      '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + labels + '</div><div style="font-size:11px;color:#3B6D11">총 라벨번호</div></div>' +
-      '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + indivs + '</div><div style="font-size:11px;color:#3B6D11">총 개체수</div></div>' +
-      (w.rcbd ? '<div style="flex:1;background:#EAF3DE;border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:#27500A">' + (w._plots || 0) + '</div><div style="font-size:11px;color:#3B6D11">시험구(반복 포함)</div></div>' : '') +
+      '<div style="flex:1;background:var(--green-t);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:var(--green-ink)">' + labels + '</div><div style="font-size:11px;color:var(--green-d)">총 라벨번호</div></div>' +
+      '<div style="flex:1;background:var(--green-t);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:var(--green-ink)">' + indivs + '</div><div style="font-size:11px;color:var(--green-d)">총 개체수</div></div>' +
+      (w.rcbd ? '<div style="flex:1;background:var(--green-t);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700;color:var(--green-ink)">' + (w._plots || 0) + '</div><div style="font-size:11px;color:var(--green-d)">시험구(반복 포함)</div></div>' : '') +
       '<div style="flex:1;background:var(--surface-2);border:0.5px solid var(--border);border-radius:10px;padding:9px 11px"><div style="font-size:18px;font-weight:700">' + active + '</div><div style="font-size:11px;color:var(--text-muted)">형질</div></div></div>';
   }
   function wizBlock(w) {
@@ -1585,11 +1609,11 @@
   // ---------- HOME ----------
   function renderSyncStat(el) {
     var online = navigator.onLine, on = S.settings.syncOn !== false;
-    if (!on) { el.style.cssText = base('#F1F2EF', '#D8DCD3'); el.innerHTML = ico('cloud-off', '#8C9583', 24) + txt('동기화 꺼짐', '#59634F', '기기에만 저장됩니다 · 미전송 ' + S.pending + '건') + sw(false); wire(); return; }
-    if (S.syncing) { el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-upload', '#3B6D11', 24) + txt('동기화 중…', '#27500A', '전송하고 있습니다') + sw(true); wire(); return; }
-    if (!online) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-off', '#B0721A', 24) + txt('오프라인 · 미전송 ' + S.pending + '건', '#8A5A12', '연결되면 자동으로 올라갑니다') + sw(true); wire(); return; }
-    if (S.pending > 0) { el.style.cssText = base('#FAEEDA', '#EAD6A8'); el.innerHTML = ico('cloud-upload', '#B0721A', 24) + txt('미전송 ' + S.pending + '건', '#8A5A12', '탭하여 지금 동기화') + sw(true); wire(); return; }
-    el.style.cssText = base('#EAF3DE', '#CFE0BA'); el.innerHTML = ico('cloud-check', '#3B6D11', 24) + txt('동기화됨', '#27500A', S.lastSync ? tm(S.lastSync) + ' · 시트 반영' : '전송할 항목 없음') + sw(true); wire();
+    if (!on) { el.style.cssText = base('var(--surface-1)', 'var(--border-strong)'); el.innerHTML = ico('cloud-off', 'var(--text-muted)', 24) + txt('동기화 꺼짐', 'var(--text-secondary)', '기기에만 저장됩니다 · 미전송 ' + S.pending + '건') + sw(false); wire(); return; }
+    if (S.syncing) { el.style.cssText = base('var(--green-t)', 'var(--green-tbr)'); el.innerHTML = ico('cloud-upload', 'var(--green-d)', 24) + txt('동기화 중…', 'var(--green-ink)', '전송하고 있습니다') + sw(true); wire(); return; }
+    if (!online) { el.style.cssText = base('var(--amber-bg)', 'var(--amber-br)'); el.innerHTML = ico('cloud-off', 'var(--amber)', 24) + txt('오프라인 · 미전송 ' + S.pending + '건', 'var(--amber-ink)', '연결되면 자동으로 올라갑니다') + sw(true); wire(); return; }
+    if (S.pending > 0) { el.style.cssText = base('var(--amber-bg)', 'var(--amber-br)'); el.innerHTML = ico('cloud-upload', 'var(--amber)', 24) + txt('미전송 ' + S.pending + '건', 'var(--amber-ink)', '탭하여 지금 동기화') + sw(true); wire(); return; }
+    el.style.cssText = base('var(--green-t)', 'var(--green-tbr)'); el.innerHTML = ico('cloud-check', 'var(--green-d)', 24) + txt('동기화됨', 'var(--green-ink)', S.lastSync ? tm(S.lastSync) + ' · 시트 반영' : '전송할 항목 없음') + sw(true); wire();
     function base(bg, bd) { return 'margin:4px 14px 0;padding:12px 13px;border-radius:12px;display:flex;align-items:center;gap:11px;cursor:pointer;background:' + bg + ';border:0.5px solid ' + bd; }
     function txt(a, c, b) { return '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:' + c + '">' + a + '</div><div style="font-size:11px;color:' + c + ';opacity:.8;margin-top:1px">' + b + '</div></div>'; }
     function sw(isOn) { return '<div class="sw' + (isOn ? ' on' : '') + '" id="syncSw" style="flex:0 0 auto"><div class="knob"></div></div>'; }
@@ -1611,8 +1635,8 @@
   function bkWhen(ts) { var d = new Date(ts); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + tm(ts); }
 
   function homeEmptyHTML() {
-    return '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px"><div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div><div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div><button class="btn" id="heGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button></div>' +
-      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', '#fff', 18) + ' 새 과제 만들기</button>' +
+    return '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px"><div style="width:40px;height:40px;border-radius:11px;background:var(--green);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', 'var(--on-green)', 23) + '</div><div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div><button class="btn" id="heGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button></div>' +
+      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 24px;text-align:center;color:var(--text-muted)">' + ico('clipboard-list', 'var(--border-strong)', 48) + '<div style="font-size:14px;margin-top:14px">아직 과제가 없습니다</div><button class="btn primary" id="heNew" style="height:48px;padding:0 22px;font-size:15px;margin-top:18px;display:inline-flex;align-items:center;gap:6px">' + ico('plus', 'var(--on-green)', 18) + ' 새 과제 만들기</button>' +
       '<button class="btn" id="heLoad" style="height:46px;padding:0 20px;font-size:14px;margin-top:10px;display:inline-flex;align-items:center;gap:6px">' + ico('database-import', 'var(--text-primary)', 17) + ' 백업에서 불러오기</button></div>';
   }
   function selectGen(i) { S.genIdx = i; S.lineIdx = 0; S.indiv = 1; var g = curGen(); S.date = g.surveyDates[g.surveyDates.length - 1]; S.trait = g.traits[0].id; loadVals().then(function () { go('collect'); }); }
@@ -1621,7 +1645,7 @@
     var src = projectOf(key); if (!src) return;
     openOverlay(
       '<div class="ovl-title">과제 복제</div>' +
-      '<div class="ovl-msg"><b>' + esc(src.name) + '</b>의 세대 ' + src.items.length + '개 · 라벨번호 ' + src.lines + '개와 형질세트를 그대로 복사합니다.<br><span style="color:#8A5A12">조사값·사진·선발 표시는 복사되지 않습니다.</span></div>' +
+      '<div class="ovl-msg"><b>' + esc(src.name) + '</b>의 세대 ' + src.items.length + '개 · 라벨번호 ' + src.lines + '개와 형질세트를 그대로 복사합니다.<br><span style="color:var(--amber-ink)">조사값·사진·선발 표시는 복사되지 않습니다.</span></div>' +
       '<input class="ein" id="dupName" style="margin-top:12px;font-size:15px" value="' + esc(src.name + ' (복사)') + '">' +
       '<div class="ovl-btns"><button class="btn" id="dupCancel">취소</button><button class="btn primary" id="dupOk">복제</button></div>'
     );
@@ -1729,8 +1753,8 @@
     var out = WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color }; });
     var pal = ['#8E7CC3', '#C2185B', '#00838F', '#5D8AA8', '#B8860B', '#6D4C41'];
     S.gens.forEach(function (x) { if (x.crop && !out.some(function (o) { return o.name === x.crop; })) out.push({ name: x.crop, color: x.color || pal[out.length % pal.length] }); });
-    if (!out.some(function (o) { return o.name === '미분류'; })) out.push({ name: '미분류', color: '#8C9583' });
-    if (S.geCrop && !out.some(function (o) { return o.name === S.geCrop; })) out.push({ name: S.geCrop, color: S.geColor || '#639922' });
+    if (!out.some(function (o) { return o.name === '미분류'; })) out.push({ name: '미분류', color: 'var(--text-muted)' });
+    if (S.geCrop && !out.some(function (o) { return o.name === S.geCrop; })) out.push({ name: S.geCrop, color: S.geColor || 'var(--green)' });
     return out;
   }
   function geCropPopup() {
@@ -1838,7 +1862,7 @@
           cel('gen', l.gen || it.g.label || '', '44px') +
           cel('rep', l.rep || '', '38px', 'type="number"') +
           cel('indivTotal', l.indivTotal || '', '40px', 'type="number"') +
-          '<td style="padding:3px 0"><button class="btn geLdel" data-g="' + it.idx + '" data-i="' + li + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 13) + '</button></td></tr>';
+          '<td style="padding:3px 0"><button class="btn geLdel" data-g="' + it.idx + '" data-i="' + li + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:var(--danger);border-color:var(--danger-br)">' + ico('circle-x', 'var(--danger)', 13) + '</button></td></tr>';
       }).join('');
     }).join('');
     // 세대 보기 — '전체'면 모아서, 세대를 고르면 그 세대만 (형질·계통 표 모두). 이 화면에서만 쓰는 설정이다.
@@ -1887,8 +1911,8 @@
         '<button class="btn" id="geLadd" style="width:100%;height:40px;font-size:13px;margin-top:8px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 계통 추가</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">과제의 <b>모든 세대</b>를 한 표에서 수정합니다. <b>세대</b> 칸을 고치면 저장할 때 그 세대로 옮겨지고(없는 세대면 새로 만듭니다), 조사값·선발 표시도 함께 따라갑니다. 계통을 지우면 그 계통의 수집값도 삭제됩니다.</div>' +
         '<div style="display:flex;gap:8px;margin-top:20px">' +
-          (proj.items.length > 1 && viewIdx != null ? '<button class="btn" id="geDelGen" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' ' + esc(g.label) + ' 세대 삭제</button>' : '') +
-          '<button class="btn" id="geDel" style="flex:1;height:46px;font-size:13px;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', '#C0392B', 15) + ' 과제 전체 삭제</button></div>' +
+          (proj.items.length > 1 && viewIdx != null ? '<button class="btn" id="geDelGen" style="flex:1;height:46px;font-size:13px;color:var(--danger);border-color:var(--danger-br);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', 'var(--danger)', 15) + ' ' + esc(g.label) + ' 세대 삭제</button>' : '') +
+          '<button class="btn" id="geDel" style="flex:1;height:46px;font-size:13px;color:var(--danger);border-color:var(--danger-br);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('trash', 'var(--danger)', 15) + ' 과제 전체 삭제</button></div>' +
       '</div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><button class="btn primary" id="geSave" style="width:100%;height:48px;font-size:15px">저장</button></div>';
     function collect() {
@@ -2093,14 +2117,14 @@
 
   function projRowHTML(p, inFolder) {
     var cur = p.id === curProjKey();
-    return '<div class="hprojrow" data-p="' + esc(p.id) + '" style="border:0.5px solid ' + (cur ? '#639922' : 'var(--border-strong)') + ';background:' + (cur ? '#F7FAF2' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px' + (inFolder ? ';margin-left:12px' : '') + '">' +
+    return '<div class="hprojrow" data-p="' + esc(p.id) + '" style="border:0.5px solid ' + (cur ? 'var(--green)' : 'var(--border-strong)') + ';background:' + (cur ? 'var(--surface-1)' : 'var(--surface-2)') + ';border-radius:11px;margin-bottom:8px;padding:10px 10px' + (inFolder ? ';margin-left:12px' : '') + '">' +
       '<div style="display:flex;align-items:center;gap:9px">' +
-        '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || '#639922') + '"></div>' +
+        '<div style="width:4px;height:32px;border-radius:2px;background:' + (p.color || 'var(--green)') + '"></div>' +
         '<div class="hprojopen" data-p="' + esc(p.id) + '" style="flex:1;min-width:0;cursor:pointer"><div style="font-size:13px;font-weight:500">' + esc(p.name) + '</div><div style="font-size:11px;color:var(--text-muted)">세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
         (inFolder ? '<button class="btn hprojout" data-p="' + esc(p.id) + '" style="height:30px;padding:0 8px;font-size:11px;flex:0 0 auto">빼기</button>' : '') +
         '<button class="btn hprojcopy" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('copy', 'var(--text-secondary)', 16) + '</button>' +
         '<button class="btn hprojedit" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('pencil', 'var(--text-secondary)', 16) + '</button>' +
-        '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE">' + ico('trash', '#C0392B', 16) + '</button>' +
+        '<button class="btn hprojdel" data-p="' + esc(p.id) + '" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;color:var(--danger);border-color:var(--danger-br)">' + ico('trash', 'var(--danger)', 16) + '</button>' +
       '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-top:9px">' +
         '<div class="scroll-x" style="gap:6px;flex:1;min-width:0">' + p.items.map(function (it) {
@@ -2116,7 +2140,7 @@
     var d = projDate(p); if (!d || !d.label) return '';
     var col = d.has ? 'var(--text-secondary)' : 'var(--text-muted)';
     return '<div style="flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:' + col + ';white-space:nowrap">' +
-      ico('calendar-event', d.has ? '#3B6D11' : 'var(--text-muted)', 12) + '조사 ' + esc(d.label) + '</div>';
+      ico('calendar-event', d.has ? 'var(--green-d)' : 'var(--text-muted)', 12) + '조사 ' + esc(d.label) + '</div>';
   }
   // 과제 행을 꾹 눌러 다른 과제·폴더 위로 끌면 폴더로 묶임
   function setupProjDrag() {
@@ -2187,7 +2211,7 @@
       html += '<div class="hfolder" data-f="' + esc(f.id) + '" style="border:0.5px dashed var(--border-strong);border-radius:12px;padding:8px 8px 2px;margin-bottom:10px;background:var(--surface-1)">' +
         '<div style="display:flex;align-items:center;gap:8px;padding:2px 4px 8px">' +
           '<button class="btn hfoldtoggle" data-f="' + esc(f.id) + '" style="width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center">' + ico(open ? 'chevron-down' : 'chevron-right', 'var(--text-secondary)', 16) + '</button>' +
-          '<div style="flex:1;min-width:0;font-size:13px;font-weight:600">' + ico('folder', '#639922', 14) + ' ' + esc(f.name) + ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">과제 ' + ps.length + '</span></div>' +
+          '<div style="flex:1;min-width:0;font-size:13px;font-weight:600">' + ico('folder', 'var(--green)', 14) + ' ' + esc(f.name) + ' <span style="font-size:11px;color:var(--text-muted);font-weight:400">과제 ' + ps.length + '</span></div>' +
           '<button class="btn hfoldedit" data-f="' + esc(f.id) + '" style="width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center">' + ico('pencil', 'var(--text-secondary)', 15) + '</button>' +
         '</div>' +
         (open ? (ps.length ? ps.map(function (p) { return projRowHTML(p, true); }).join('')
@@ -2216,25 +2240,25 @@
     var doneToday = Object.keys(S.vals).length; // rough
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:11px;padding:16px 16px 10px">' +
-        '<div style="width:40px;height:40px;border-radius:11px;background:#639922;display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', '#fff', 23) + '</div>' +
+        '<div style="width:40px;height:40px;border-radius:11px;background:var(--green);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico('plant-2', 'var(--on-green)', 23) + '</div>' +
         '<div style="flex:1"><div style="font-size:18px;font-weight:700">Crop Memo Pro</div><div style="font-size:11px;color:var(--text-muted)">종자연구소 야장 · 버전정보 ' + APP_VERSION + '</div></div>' +
         '<button class="btn" id="hGear" style="width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:10px">' + ico('settings', 'var(--text-secondary)', 20) + '</button>' +
       '</div>' +
       '<div id="syncStat"></div>' +
       // 기기 백업 — 다운로드 폴더의 CropMemo 폴더로 저장
       '<div id="bkCard" style="margin:8px 14px 0;padding:12px 13px;border-radius:12px;background:var(--surface-1);border:0.5px solid var(--border);display:flex;align-items:center;gap:11px;cursor:pointer">' +
-        ico('device-floppy', '#3B6D11', 24) +
+        ico('device-floppy', 'var(--green-d)', 24) +
         '<div style="flex:1"><div style="font-size:13px;font-weight:600">기기 백업</div>' +
           '<div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + (S.lastBackup ? '마지막 백업 ' + bkWhen(S.lastBackup) : '다운로드 폴더 · CropMemo') + '</div></div>' +
         ico('chevron-right', 'var(--text-muted)', 18) +
       '</div>' +
-      '<div style="margin:14px 14px 0;padding:14px;border-radius:14px;background:#EAF3DE;border:0.5px solid #CFE0BA">' +
-        '<div style="font-size:11px;color:#3B6D11;font-weight:600">이어서 수집</div>' +
+      '<div style="margin:14px 14px 0;padding:14px;border-radius:14px;background:var(--green-t);border:0.5px solid var(--green-tbr)">' +
+        '<div style="font-size:11px;color:var(--green-d);font-weight:600">이어서 수집</div>' +
         '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">' +
-          '<div style="width:44px;height:44px;border-radius:10px;background:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto"><span style="font-size:15px;font-weight:700;color:#27500A">' + esc(g.label) + '</span></div>' +
+          '<div style="width:44px;height:44px;border-radius:10px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto"><span style="font-size:15px;font-weight:700;color:var(--green-ink)">' + esc(g.label) + '</span></div>' +
           '<div style="flex:1"><div style="font-size:14px;font-weight:600">' + esc(g.projName) + '</div><div style="font-size:12px;color:var(--text-secondary);margin-top:1px">' + esc(l.label) + ' · 개체 <b>' + S.indiv + '</b>/' + l.indivTotal + ' · 조합 <b>' + hc.comb + '</b> · 계통 <b>' + hc.line + '</b></div></div>' +
         '</div>' +
-        '<button class="btn primary" id="hResume" style="width:100%;height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px">' + ico('clipboard-list', '#fff', 20) + ' 야장 수집 계속</button>' +
+        '<button class="btn primary" id="hResume" style="width:100%;height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px;margin-top:12px">' + ico('clipboard-list', 'var(--on-green)', 20) + ' 야장 수집 계속</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;margin:14px 14px 0">' +
         stat(hc.comb, '조합') + stat(hc.line, '계통') + stat(hc.sel, '선발') + statP() +
@@ -2273,7 +2297,7 @@
     document.querySelectorAll('.hfoldtoggle').forEach(function (b) { b.onclick = function () { var id = b.getAttribute('data-f'); S.folderOpen = S.folderOpen || {}; S.folderOpen[id] = !S.folderOpen[id]; renderHome(); }; });
     setupProjDrag();
     function stat(n, label) { return '<div style="flex:1;min-width:0;background:var(--surface-1);border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600">' + n + '</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + label + '</div></div>'; }
-    function statP() { return '<div style="flex:1;min-width:0;background:#FAEEDA;border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600;color:#8A5A12" data-pending>' + S.pending + '</div><div style="font-size:11px;color:#B0721A;margin-top:1px">미동기화</div></div>'; }
+    function statP() { return '<div style="flex:1;min-width:0;background:var(--amber-bg);border-radius:11px;padding:10px 8px"><div style="font-size:19px;font-weight:600;color:var(--amber-ink)" data-pending>' + S.pending + '</div><div style="font-size:11px;color:var(--amber);margin-top:1px">미동기화</div></div>'; }
   }
 
   // ---------- COLLECT ----------
@@ -2305,7 +2329,7 @@
       '<div id="cInput" style="padding:2px 14px 8px;min-height:180px"></div>' +
       '<div id="cHist" style="padding:0 14px 10px"></div>' +
       '<div id="cQuick" style="display:flex;gap:8px;padding:0 14px 10px">' +
-        '<button class="btn" id="qPhoto" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('photo', 'var(--text-primary)', 18) + ' 사진<span id="qPhotoN" style="color:#3B6D11;font-weight:600"></span></button>' +
+        '<button class="btn" id="qPhoto" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('photo', 'var(--text-primary)', 18) + ' 사진<span id="qPhotoN" style="color:var(--green-d);font-weight:600"></span></button>' +
         '<button class="btn" id="qDraw" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('brush', 'var(--text-primary)', 18) + ' 그리기</button>' +
         '<button class="btn" id="qVoice" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('microphone', 'var(--text-primary)', 18) + ' 음성</button>' +
       '</div>' +
@@ -2360,14 +2384,14 @@
     var pct = Math.round(((pos + 1) / seq.length) * 100);
     var genTag = (p && p.items.length > 1)
       ? '<span style="flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary)">' +
-          '<span style="background:#EAF3DE;color:#27500A;border-radius:9px;padding:2px 8px;font-weight:600">' + esc(g.label) + '</span>' +
+          '<span style="background:var(--green-t);color:var(--green-ink);border-radius:9px;padding:2px 8px;font-weight:600">' + esc(g.label) + '</span>' +
           esc(genRole(g.label)) + ' 세대</span>'
       : '';
     bar.style.padding = '8px 12px 0';
     bar.innerHTML =
       '<div style="display:flex;align-items:center;gap:8px">' +
         '<span style="flex:1;min-width:0;font-size:11px;color:var(--text-secondary)">' +
-          ico('list-numbers', '#639922', 13) + ' 라벨번호 <b style="color:#27500A">' + (pos + 1) + '</b> / ' + seq.length +
+          ico('list-numbers', 'var(--green)', 13) + ' 라벨번호 <b style="color:var(--green-ink)">' + (pos + 1) + '</b> / ' + seq.length +
           (p && p.items.length > 1 ? ' <span style="color:var(--text-muted)">· 세대 ' + p.items.length + '개를 이어서</span>' : '') +
         '</span>' + genTag +
       '</div>' +
@@ -2440,18 +2464,18 @@
     var g = curGen(), l = curLine(), c = $('cCard'); if (!c) return;
     var isel = !!S.indivSel[l.id + ':' + S.indiv];
     var lsel = !!l.selected;
-    var sc = function () { return '<i class="ti ' + (lsel ? 'ti-star-filled' : 'ti-star') + '" style="font-size:9px;color:' + (lsel ? '#639922' : 'var(--text-muted)') + '"></i>'; };
+    var sc = function () { return '<i class="ti ' + (lsel ? 'ti-star-filled' : 'ti-star') + '" style="font-size:9px;color:' + (lsel ? 'var(--green)' : 'var(--text-muted)') + '"></i>'; };
     c.innerHTML = '<div class="card"><div style="display:flex;align-items:flex-start;justify-content:space-between">' +
       '<div style="min-width:0"><div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
         '<span id="cLabel" style="font-size:17px;font-weight:600;cursor:pointer;border-bottom:1px dashed var(--border-strong)">' + esc(l.label) + '</span>' +
         '<span style="font-size:10px;color:var(--text-muted)">' + ico('pencil', 'var(--text-muted)', 12) + ' 정보수정</span>' +
         '<button class="btn" id="cScan" style="padding:2px 7px;font-size:10px;display:inline-flex;align-items:center;gap:3px">' + ico('camera', 'var(--text-primary)', 12) + ' 스캔</button>' +
       '</div>' +
-      (l.pedigree ? '<div style="font-size:13px;color:#3B6D11;font-weight:600;margin-top:3px">' + ico('seeding', '#639922', 13) + ' ' + esc(l.pedigree) + '</div>' : '') +
-      '<div style="font-size:15px;color:var(--text-secondary);margin-top:3px">개체 <b style="color:#27500A">' + S.indiv + '</b>/' + l.indivTotal + ' · ' + esc(l.zone) + ' · ' + l.row + '행 ' + l.col + '열 · 반복 ' + l.rep + '</div></div>' +
+      (l.pedigree ? '<div style="font-size:13px;color:var(--green-d);font-weight:600;margin-top:3px">' + ico('seeding', 'var(--green)', 13) + ' ' + esc(l.pedigree) + '</div>' : '') +
+      '<div style="font-size:15px;color:var(--text-secondary);margin-top:3px">개체 <b style="color:var(--green-ink)">' + S.indiv + '</b>/' + l.indivTotal + ' · ' + esc(l.zone) + ' · ' + l.row + '행 ' + l.col + '열 · 반복 ' + l.rep + '</div></div>' +
       '<div style="display:flex;gap:8px;flex:0 0 auto">' +
-        '<button class="btn" id="cIsel" style="width:46px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:1px' + (isel ? ';background:#EAF3DE;border-color:#639922' : '') + '"><i class="ti ' + (isel ? 'ti-star-filled' : 'ti-star') + '" style="font-size:20px;color:' + (isel ? '#639922' : 'var(--text-muted)') + '"></i><span style="font-size:8px;color:' + (isel ? '#3B6D11' : 'var(--text-muted)') + '">선발</span></button>' +
-        '<button class="btn" id="cLsel" style="width:46px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:2px' + (lsel ? ';background:#EAF3DE;border-color:#639922' : '') + '"><span style="display:grid;grid-template-columns:1fr 1fr;gap:1px;line-height:1">' + sc() + sc() + sc() + sc() + '</span><span style="font-size:8px;color:' + (lsel ? '#3B6D11' : 'var(--text-muted)') + '">선발</span></button>' +
+        '<button class="btn" id="cIsel" style="width:46px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:1px' + (isel ? ';background:var(--green-t);border-color:var(--green)' : '') + '"><i class="ti ' + (isel ? 'ti-star-filled' : 'ti-star') + '" style="font-size:20px;color:' + (isel ? 'var(--green)' : 'var(--text-muted)') + '"></i><span style="font-size:8px;color:' + (isel ? 'var(--green-d)' : 'var(--text-muted)') + '">선발</span></button>' +
+        '<button class="btn" id="cLsel" style="width:46px;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:10px;gap:2px' + (lsel ? ';background:var(--green-t);border-color:var(--green)' : '') + '"><span style="display:grid;grid-template-columns:1fr 1fr;gap:1px;line-height:1">' + sc() + sc() + sc() + sc() + '</span><span style="font-size:8px;color:' + (lsel ? 'var(--green-d)' : 'var(--text-muted)') + '">선발</span></button>' +
       '</div></div></div>';
     $('cLabel').onclick = function () { editLine(); };
     $('cScan').onclick = function () { S.ocr = { stage: 'idle', img: null, text: '', conf: 0, status: '' }; go('ocr'); };
@@ -2468,7 +2492,7 @@
         '<input class="ein" id="' + id + '" ' + (extra || '') + ' style="margin-top:5px;font-size:15px" value="' + esc(val == null ? '' : String(val)) + '"></div>';
     };
     openOverlay(
-      '<div class="ovl-title">' + ico('pencil', '#3B6D11', 18) + ' 라벨 정보 수정</div>' +
+      '<div class="ovl-title">' + ico('pencil', 'var(--green-d)', 18) + ' 라벨 정보 수정</div>' +
       fld('elLabel', '라벨번호', l.label) +
       fld('elPed', '품종명/Pedigree', l.pedigree || '') +
       fld('elIndiv', '개체 수', l.indivTotal, 'type="number" inputmode="numeric" min="1"') +
@@ -2489,13 +2513,13 @@
 
   function renderDate() {
     var g = curGen(), bar = $('cDate'); if (!bar) return;
-    var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
+    var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', 'var(--green-d)', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
     g.surveyDates.forEach(function (d) {
       var act = d === S.date;
-      html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', '#3B6D11', 11) : '') + '</button>';
+      html += '<button class="btn" data-d="' + esc(d) + '" style="padding:5px 11px;font-size:12px;border-radius:16px;display:inline-flex;align-items:center;gap:4px' + (act ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + esc(d) + (act ? ' ' + ico('pencil', 'var(--green-d)', 11) : '') + '</button>';
     });
     html += '<button class="btn" id="cNewDate" style="padding:5px 10px;font-size:12px;border-radius:16px;border-style:dashed;color:var(--text-secondary)">' + ico('plus', 'var(--text-secondary)', 13) + ' 새 조사</button></div>' +
-      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">조사일 탭 → 수정·삭제 · ' + ico('clock', '#3B6D11', 10) + ' 값은 조사일마다 따로 저장됩니다</div>';
+      '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">조사일 탭 → 수정·삭제 · ' + ico('clock', 'var(--green-d)', 10) + ' 값은 조사일마다 따로 저장됩니다</div>';
     bar.innerHTML = html;
     bar.querySelectorAll('[data-d]').forEach(function (b) { b.onclick = function () { var d = b.getAttribute('data-d'); if (d === S.date) { dateMenu(d); } else { S.date = d; loadValsThen(renderCollect); } }; });
     $('cNewDate').onclick = function () { newDatePopup(); };
@@ -2520,7 +2544,7 @@
         '<div class="ovl-msg"' + (opts.big ? ' style="font-size:26px;line-height:1.45;color:var(--text-primary);font-weight:600;text-align:center;padding:8px 0 4px"' : '') + '>' + body + '</div>' +
         '<div class="ovl-btns"><button class="btn" id="cfNo">취소</button>' +
         '<button class="btn' + (opts.danger ? '' : ' primary') + '" id="cfYes"' +
-          (opts.danger ? ' style="background:#C0392B;border-color:#A5342A;color:#fff;font-weight:600"' : '') + '>' + esc(opts.ok || '확인') + '</button></div>'
+          (opts.danger ? ' style="background:var(--danger-fill);border-color:#A5342A;color:#fff;font-weight:600"' : '') + '>' + esc(opts.ok || '확인') + '</button></div>'
       );
       $('cfNo').onclick = function () { closeOverlay(); resolve(false); };
       $('cfYes').onclick = function () { closeOverlay(); resolve(true); };
@@ -2529,12 +2553,12 @@
   function dateMenu(d) {
     var g = curGen(), only = g.surveyDates.length <= 1;
     openOverlay(
-      '<div class="ovl-title">' + ico('calendar-event', '#3B6D11', 18) + ' 조사일 ' + esc(d) + '</div>' +
-      '<div class="ovl-msg">이 조사일을 수정하거나 삭제할 수 있습니다.' + (only ? '<br><span style="color:#B0721A">조사일이 하나뿐이라 삭제할 수 없습니다.</span>' : '') + '</div>' +
+      '<div class="ovl-title">' + ico('calendar-event', 'var(--green-d)', 18) + ' 조사일 ' + esc(d) + '</div>' +
+      '<div class="ovl-msg">이 조사일을 수정하거나 삭제할 수 있습니다.' + (only ? '<br><span style="color:var(--amber)">조사일이 하나뿐이라 삭제할 수 없습니다.</span>' : '') + '</div>' +
       '<div class="ovl-btns">' +
         '<button class="btn" id="dmCancel">취소</button>' +
-        '<button class="btn primary" id="dmEdit">' + ico('pencil', '#fff', 15) + ' 수정</button>' +
-        '<button class="btn" id="dmDel" style="color:#C0392B;border-color:#E3B4AE' + (only ? ';opacity:.45' : '') + '">' + ico('trash', '#C0392B', 15) + ' 삭제</button>' +
+        '<button class="btn primary" id="dmEdit">' + ico('pencil', 'var(--on-green)', 15) + ' 수정</button>' +
+        '<button class="btn" id="dmDel" style="color:var(--danger);border-color:var(--danger-br)' + (only ? ';opacity:.45' : '') + '">' + ico('trash', 'var(--danger)', 15) + ' 삭제</button>' +
       '</div>'
     );
     $('dmCancel').onclick = closeOverlay;
@@ -2559,9 +2583,9 @@
   }
   function dateDeletePopup(d) {
     openOverlay(
-      '<div class="ovl-title" style="color:#C0392B">조사일 삭제</div>' +
+      '<div class="ovl-title" style="color:var(--danger)">조사일 삭제</div>' +
       '<div class="ovl-msg"><b>' + esc(d) + '</b> 조사일을 삭제할까요?<br>이 날짜에 입력한 시계열 값도 함께 삭제되며 되돌릴 수 없습니다.</div>' +
-      '<div class="ovl-btns"><button class="btn" id="dmNo">취소</button><button class="btn" id="dmYes" style="background:#C0392B;border-color:#A93226;color:#fff;font-weight:600">삭제</button></div>'
+      '<div class="ovl-btns"><button class="btn" id="dmNo">취소</button><button class="btn" id="dmYes" style="background:var(--danger-fill);border-color:#A93226;color:#fff;font-weight:600">삭제</button></div>'
     );
     $('dmNo').onclick = closeOverlay;
     $('dmYes').onclick = function () { closeOverlay(); deleteSurveyDate(d); };
@@ -2628,7 +2652,7 @@
     var v = getValFor(t.id);
     var head = document.createElement('div'); head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px';
     var hu = headUnit(t);
-    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (hu ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + hu + ')</span>' : '') + ' <span style="font-size:11px;color:#3B6D11">· ' + S.date + '</span>' + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
+    head.innerHTML = '<div style="font-size:15px;font-weight:600">' + esc(t.name) + (hu ? ' <span style="font-size:12px;color:var(--text-muted);font-weight:400">(' + hu + ')</span>' : '') + ' <span style="font-size:11px;color:var(--green-d)">· ' + S.date + '</span>' + '</div><div id="cAvg" style="font-size:11px;color:var(--text-muted)"></div>';
     area.appendChild(head);
 
     if (t.type === 'numeric' || t.type === 'counter' || t.type === 'ratio') {
@@ -2660,7 +2684,7 @@
       wrap.style.cssText = 'display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:2px;width:72%;margin-left:auto';
       opts.forEach(function (o) {
         var on = String(v) === String(o);
-        var b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px' + (on ? ';background:#639922;border-color:#3B6D11;color:#fff' : '');
+        var b = document.createElement('button'); b.className = 'btn'; b.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px' + (on ? ';background:var(--green);border-color:var(--green-d);color:#fff' : '');
         b.textContent = o;
         b.onclick = function () { var cur = getValFor(t.id); var nv = (String(cur) === String(o)) ? '' : String(o); setVal(t.id, nv).then(function () { renderInput(); renderPills(); renderHist(); }); };
         wrap.appendChild(b);
@@ -2669,12 +2693,12 @@
       var vv = String(v == null ? '' : v).trim();
       if (vv && !opts.some(function (o) { return String(o) === vv; })) {
         var ob = document.createElement('button'); ob.className = 'btn';
-        ob.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px;background:#B0721A;border-color:#8A5A14;color:#fff';
+        ob.style.cssText = 'min-width:52px;height:48px;font-size:16px;font-weight:600;border-radius:12px;background:var(--amber);border-color:#8A5A14;color:#fff';
         ob.textContent = vv;
         ob.onclick = function () { setVal(t.id, '').then(function () { renderInput(); renderPills(); renderHist(); }); };
         wrap.appendChild(ob);
         var w2 = document.createElement('div');
-        w2.style.cssText = 'font-size:11px;color:#B0721A;margin-top:8px;line-height:1.6';
+        w2.style.cssText = 'font-size:11px;color:var(--amber);margin-top:8px;line-height:1.6';
         w2.textContent = '‘' + vv + '’ 은(는) 지금 ' + (t.type === 'rating' ? '척도' : '항목') + ' 목록에 없는 값입니다. 값은 그대로 저장돼 있고, 눌러서 지우거나 형질 수정에서 목록에 다시 넣을 수 있습니다.';
         area.appendChild(wrap); area.appendChild(w2);
       } else area.appendChild(wrap);
@@ -2687,7 +2711,7 @@
       var isImg = typeof v === 'string' && v.indexOf('data:image') === 0;
       if (isImg) {
         var box = document.createElement('div');
-        box.innerHTML = '<img src="' + v + '" style="width:100%;max-height:200px;object-fit:contain;border:0.5px solid var(--border-strong);border-radius:10px;background:#fff">' +
+        box.innerHTML = '<img src="' + v + '" style="width:100%;max-height:200px;object-fit:contain;border:0.5px solid var(--border-strong);border-radius:10px;background:var(--surface-2)">' +
           '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="txDraw" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('pencil', 'var(--text-primary)', 16) + ' 다시 그리기</button><button class="btn" id="txText" style="flex:1;height:44px;font-size:13px">글자로 입력</button></div>';
         area.appendChild(box);
         $('txDraw').onclick = function () { S.write = { tid: t.id }; go('write'); };
@@ -2723,8 +2747,8 @@
     var h = $('cHist'); if (!h) return; h.innerHTML = '';
     var t = traitById(S.trait), g = curGen(), l = curLine();
     if (!t) return;
-    var parts = g.surveyDates.map(function (d) { var vv = S.vals[g.id + ':' + l.id + ':' + S.indiv + ':' + t.id + '@' + d]; return '<span style="' + (d === S.date ? 'color:#27500A;font-weight:600' : 'color:var(--text-secondary)') + '">' + d + ' ' + ((vv == null || vv === '') ? '—' : esc(vv)) + '</span>'; });
-    h.innerHTML = '<div class="card" style="font-size:11px;color:var(--text-secondary)">' + ico('history', '#3B6D11', 12) + ' 이 개체 ' + esc(t.name) + ' 추이 · ' + parts.join(' → ') + '</div>';
+    var parts = g.surveyDates.map(function (d) { var vv = S.vals[g.id + ':' + l.id + ':' + S.indiv + ':' + t.id + '@' + d]; return '<span style="' + (d === S.date ? 'color:var(--green-ink);font-weight:600' : 'color:var(--text-secondary)') + '">' + d + ' ' + ((vv == null || vv === '') ? '—' : esc(vv)) + '</span>'; });
+    h.innerHTML = '<div class="card" style="font-size:11px;color:var(--text-secondary)">' + ico('history', 'var(--green-d)', 12) + ' 이 개체 ' + esc(t.name) + ' 추이 · ' + parts.join(' → ') + '</div>';
   }
 
   var UNREADABLE = '판독불가';
@@ -2749,18 +2773,18 @@
     px = px || 'tE';
     if (t.type === 'numeric') {
       var units = ['mm', 'cm', 'm', 'g', 'kg', 'mg', 'SHU', 'Brix', '°', '점'];
-      var chips = units.map(function (u) { return '<button class="btn ' + px + '-uchip" data-i="' + i + '" data-u="' + u + '" style="padding:4px 9px;font-size:12px;border-radius:14px' + (t.unit === u ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + u + '</button>'; }).join('');
+      var chips = units.map(function (u) { return '<button class="btn ' + px + '-uchip" data-i="' + i + '" data-u="' + u + '" style="padding:4px 9px;font-size:12px;border-radius:14px' + (t.unit === u ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + u + '</button>'; }).join('');
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">측정 단위</div><div style="display:flex;flex-wrap:wrap;gap:6px">' + chips + '</div><input class="ein ' + px + '-unit" data-i="' + i + '" placeholder="직접 입력 (예: mmol/L)" style="height:36px;margin-top:6px;font-size:13px" value="' + esc(t.unit || '') + '"></div>';
     }
     if (t.type === 'rating') {
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">척도 · 공백이나 콤마로 구분</div><input class="ein ' + px + '-scale" data-i="' + i + '" data-old="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '" placeholder="예: 1 3 5 7 9  또는  R IR S" style="height:38px;font-size:14px" value="' + esc((t.scale || withUnreadable([1, 3, 5, 7, 9])).join(' ')) + '"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">숫자만 입력하면 평균·분산분석, 문자는 분포로 집계됩니다. 등급에는 <b>판독불가</b>가 자동 포함됩니다.</div></div>';
     }
     if (t.type === 'categorical') {
-      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" data-old="' + esc(o) + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center">' + ico('circle-x', '#C0392B', 15) + '</button></div>'; }).join('');
+      var items = (t.options || []).map(function (o, oi) { return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><input class="ein ' + px + '-opt" data-i="' + i + '" data-oi="' + oi + '" data-old="' + esc(o) + '" style="flex:1;height:36px;font-size:13px" value="' + esc(o) + '"><button class="btn ' + px + '-optdel" data-i="' + i + '" data-oi="' + oi + '" style="width:36px;height:36px;flex:0 0 auto;color:var(--danger);border-color:var(--danger-br);display:flex;align-items:center;justify-content:center">' + ico('circle-x', 'var(--danger)', 15) + '</button></div>'; }).join('');
       return '<div style="margin-top:9px"><div style="font-size:11px;color:var(--text-secondary);margin-bottom:5px">항목 · 추가·이름 변경</div>' + items + '<button class="btn ' + px + '-optadd" data-i="' + i + '" style="width:100%;height:38px;font-size:13px;border-style:dashed;color:var(--text-secondary);display:flex;align-items:center;justify-content:center;gap:5px">' + ico('plus', 'var(--text-secondary)', 15) + ' 항목 추가</button></div>';
     }
     if (t.type === 'text') {
-      return '<div style="margin-top:9px;font-size:12px;color:#3B6D11;background:#EAF3DE;border-radius:8px;padding:8px 10px">' + ico('pencil', '#3B6D11', 13) + ' 사용자가 쓰거나 그릴 수 있습니다.</div>';
+      return '<div style="margin-top:9px;font-size:12px;color:var(--green-d);background:var(--green-t);border-radius:8px;padding:8px 10px">' + ico('pencil', 'var(--green-d)', 13) + ' 사용자가 쓰거나 그릴 수 있습니다.</div>';
     }
     return '';
   }
@@ -2829,7 +2853,7 @@
         '<input class="ein tE-name" data-i="' + i + '" style="flex:1;min-width:0;height:40px" value="' + esc(t.name) + '">' +
         '<button class="btn tE-up" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === 0 ? ';opacity:.35' : '') + '">▲</button>' +
         '<button class="btn tE-down" data-i="' + i + '" style="width:30px;height:38px;flex:0 0 auto;padding:0;font-size:13px;line-height:1' + (i === g.traits.length - 1 ? ';opacity:.35' : '') + '">▼</button>' +
-        '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:#C0392B;border-color:#E3B4AE;display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', '#C0392B', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select></div>' + teConfig(t, i) + '</div>';
+        '<button class="btn tE-del" data-i="' + i + '" style="width:38px;height:38px;flex:0 0 auto;color:var(--danger);border-color:var(--danger-br);display:flex;align-items:center;justify-content:center;padding:0">' + ico('trash', 'var(--danger)', 16) + '</button></div><div style="display:flex;gap:10px;align-items:center;margin-top:8px"><select class="ein tE-type" data-i="' + i + '" style="flex:1;height:40px">' + opts + '</select></div>' + teConfig(t, i) + '</div>';
     }).join('');
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:12px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="tEBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">형질세트 편집</div><div style="font-size:11px;color:var(--text-muted)">' + (g.crop ? esc(g.crop) + ' · ' : '') + esc(g.label) + ' · ' + g.traits.length + '개 형질</div></div></div>' +
@@ -2997,14 +3021,14 @@
     wrap.innerHTML =
       '<div class="card">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-          '<span style="font-size:12px;font-weight:600">' + ico('map-2', '#639922', 14) + ' 필드맵</span>' +
-          '<button class="btn" id="mFilter" style="padding:5px 11px;font-size:12px;border-radius:16px' + (S.showSelOnly ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + ico('star', S.showSelOnly ? '#639922' : 'var(--text-secondary)', 13) + ' 선발만 보기</button>' +
+          '<span style="font-size:12px;font-weight:600">' + ico('map-2', 'var(--green)', 14) + ' 필드맵</span>' +
+          '<button class="btn" id="mFilter" style="padding:5px 11px;font-size:12px;border-radius:16px' + (S.showSelOnly ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + ico('star', S.showSelOnly ? 'var(--green)' : 'var(--text-secondary)', 13) + ' 선발만 보기</button>' +
         '</div>' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('seeding', '#639922', 13) + ' 개체 순번 (탭 이동)</span><span><span style="color:#C08A2B">★</span> 선발 · <span id="mIhint"></span></span></div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('seeding', 'var(--green)', 13) + ' 개체 순번 (탭 이동)</span><span><span style="color:var(--gold)">★</span> 선발 · <span id="mIhint"></span></span></div>' +
         '<div class="grid" id="mIndiv" style="gap:4px"></div>' +
         '<div id="mIfoot" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>' +
         '<div style="height:1px;background:var(--border);margin:12px 0"></div>' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('layout-grid', '#639922', 12) + ' 조합·계통 순번 · 과제 전체 (탭 이동)</span><span><span style="color:#E8B84B">★</span> 계통 · <span style="color:#C08A2B;font-size:8px">★</span> 개체</span></div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-secondary);margin-bottom:6px"><span>' + ico('layout-grid', 'var(--green)', 12) + ' 조합·계통 순번 · 과제 전체 (탭 이동)</span><span><span style="color:var(--gold-lite)">★</span> 계통 · <span style="color:var(--gold);font-size:8px">★</span> 개체</span></div>' +
         '<div id="mLineScroll" style="overflow:auto"><div class="grid" id="mLine" style="gap:4px"></div></div>' +
         '<div id="mLfoot" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>' +
       '</div>';
@@ -3022,10 +3046,10 @@
       if (S.showSelOnly && !S.indivSel[l.id + ':' + iv]) return;
       var b = document.createElement('button'); b.className = 'mm'; b.style.width = cell + 'px'; b.style.height = cell + 'px';
       b.setAttribute('data-iv', iv);
-      if (iv === S.indiv) { b.style.background = '#639922'; b.style.color = '#fff'; b.style.borderColor = '#3B6D11'; }
-      else if (indivEntered(l.id, iv)) { b.style.background = '#F1F6E8'; }
+      if (iv === S.indiv) { b.style.background = 'var(--green)'; b.style.color = 'var(--on-green)'; b.style.borderColor = 'var(--green-d)'; }
+      else if (indivEntered(l.id, iv)) { b.style.background = 'var(--green-cell)'; }
       b.textContent = iv;
-      if (S.indivSel[l.id + ':' + iv]) { var st = document.createElement('span'); st.textContent = '★'; st.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (iv === S.indiv ? '#fff' : '#C08A2B'); b.appendChild(st); }
+      if (S.indivSel[l.id + ':' + iv]) { var st = document.createElement('span'); st.textContent = '★'; st.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (iv === S.indiv ? 'var(--on-green)' : 'var(--gold)'); b.appendChild(st); }
       b.onclick = function () { S.indiv = iv; renderCollect(); };
       gi.appendChild(b); ish++;
     })(iv);
@@ -3046,13 +3070,13 @@
       if (S.showSelOnly && !ln.selected && !selLines[ln.id]) return;
       var b = document.createElement('button'); b.className = 'mm'; b.style.width = cell + 'px'; b.style.height = cell + 'px';
       var isCur = i === here;
-      if (isCur) { b.style.background = '#639922'; b.style.color = '#fff'; b.style.borderColor = '#3B6D11'; }
+      if (isCur) { b.style.background = 'var(--green)'; b.style.color = 'var(--on-green)'; b.style.borderColor = 'var(--green-d)'; }
       if (newGen) { b.style.borderLeft = '2px solid #639922'; }      // 세대가 바뀌는 자리
       if (ln.selected) {
         b.innerHTML = '<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(cell * 0.98) + 'px;color:' + (isCur ? '#E0B94F' : '#EBCB78') + ';pointer-events:none">★</span><span style="position:relative;z-index:1;font-weight:600">' + (i + 1) + '</span>';
       } else {
         b.textContent = (i + 1);
-        if (selLines[ln.id]) { var stq = document.createElement('span'); stq.textContent = '★'; stq.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (isCur ? '#fff' : '#C08A2B'); b.appendChild(stq); }
+        if (selLines[ln.id]) { var stq = document.createElement('span'); stq.textContent = '★'; stq.style.cssText = 'position:absolute;top:-2px;right:0;font-size:9px;color:' + (isCur ? 'var(--on-green)' : 'var(--gold)'); b.appendChild(stq); }
       }
       b.title = sg.label + ' · ' + ln.label;
       b.onclick = function () { gotoSeqPos(i, true); };
@@ -3070,10 +3094,10 @@
     for (var i = 0; i < gi.children.length; i++) {
       var b = gi.children[i], iv = +b.getAttribute('data-iv'); if (!iv) continue;
       var cur = iv === S.indiv;
-      b.style.background = cur ? '#639922' : (indivEntered(l.id, iv) ? '#F1F6E8' : '');
-      b.style.color = cur ? '#fff' : '';
-      b.style.borderColor = cur ? '#3B6D11' : '';
-      var st = b.querySelector('span'); if (st) st.style.color = cur ? '#fff' : '#C08A2B';
+      b.style.background = cur ? 'var(--green)' : (indivEntered(l.id, iv) ? 'var(--green-cell)' : '');
+      b.style.color = cur ? 'var(--on-green)' : '';
+      b.style.borderColor = cur ? 'var(--green-d)' : '';
+      var st = b.querySelector('span'); if (st) st.style.color = cur ? 'var(--on-green)' : 'var(--gold)';
     }
     var ih = $('mIhint'); if (ih) ih.textContent = '현재 ' + S.indiv + '/' + total();
   }
@@ -3091,14 +3115,14 @@
     for (var v = t0; v <= max + step * 0.5; v += step) out.push(Math.round(v * 1e6) / 1e6);
     return out;
   }
-  function svgOpen() { return '<svg xmlns="http://www.w3.org/2000/svg" width="' + CW + '" height="' + CH + '" viewBox="0 0 ' + CW + ' ' + CH + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + CW + '" height="' + CH + '" fill="#ffffff"/>'; }
+  function svgOpen() { return '<svg xmlns="http://www.w3.org/2000/svg" width="' + CW + '" height="' + CH + '" viewBox="0 0 ' + CW + ' ' + CH + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + CW + '" height="' + CH + '" fill="var(--surface-2)"/>'; }
   function svgFrame(title, xlab, ylab) {
     var x0 = CM.l, y0 = CH - CM.b, x1 = CW - CM.r, y1 = CM.t;
-    return '<text x="' + (CW / 2) + '" y="30" text-anchor="middle" font-size="19" font-weight="700" fill="#1B1E19">' + axLabel(title) + '</text>' +
-      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x1 + '" y2="' + y0 + '" stroke="#1B1E19" stroke-width="1.3"/>' +
-      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 + '" stroke="#1B1E19" stroke-width="1.3"/>' +
-      '<text x="' + ((x0 + x1) / 2) + '" y="' + (CH - 22) + '" text-anchor="middle" font-size="15" fill="#1B1E19">' + axLabel(xlab) + '</text>' +
-      '<text x="24" y="' + ((y0 + y1) / 2) + '" text-anchor="middle" font-size="15" fill="#1B1E19" transform="rotate(-90 24 ' + ((y0 + y1) / 2) + ')">' + axLabel(ylab) + '</text>';
+    return '<text x="' + (CW / 2) + '" y="30" text-anchor="middle" font-size="19" font-weight="700" fill="var(--text-primary)">' + axLabel(title) + '</text>' +
+      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x1 + '" y2="' + y0 + '" stroke="var(--text-primary)" stroke-width="1.3"/>' +
+      '<line x1="' + x0 + '" y1="' + y0 + '" x2="' + x0 + '" y2="' + y1 + '" stroke="var(--text-primary)" stroke-width="1.3"/>' +
+      '<text x="' + ((x0 + x1) / 2) + '" y="' + (CH - 22) + '" text-anchor="middle" font-size="15" fill="var(--text-primary)">' + axLabel(xlab) + '</text>' +
+      '<text x="24" y="' + ((y0 + y1) / 2) + '" text-anchor="middle" font-size="15" fill="var(--text-primary)" transform="rotate(-90 24 ' + ((y0 + y1) / 2) + ')">' + axLabel(ylab) + '</text>';
   }
   function pTxt(p) { return p < 0.0001 ? 'p < 0.0001' : 'p = ' + (p < 0.001 ? p.toExponential(1) : round(p, 4)); }
 
@@ -3122,14 +3146,14 @@
     bins.forEach(function (c, i) {
       if (!c) return;
       var bx = sx(mn + i * bw), bx2 = sx(mn + (i + 1) * bw);
-      s += '<rect x="' + bx.toFixed(1) + '" y="' + sy(c).toFixed(1) + '" width="' + Math.max(1, bx2 - bx - 1.5).toFixed(1) + '" height="' + (y0 - sy(c)).toFixed(1) + '" fill="#7FB069" fill-opacity="0.65" stroke="#3B6D11" stroke-width="1"/>';
+      s += '<rect x="' + bx.toFixed(1) + '" y="' + sy(c).toFixed(1) + '" width="' + Math.max(1, bx2 - bx - 1.5).toFixed(1) + '" height="' + (y0 - sy(c)).toFixed(1) + '" fill="#7FB069" fill-opacity="0.65" stroke="var(--green-d)" stroke-width="1"/>';
     });
     var mean = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
     s += '<line x1="' + sx(mean).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(mean).toFixed(1) + '" y2="' + y1 + '" stroke="#C0392B" stroke-width="1.6" stroke-dasharray="6 4"/>' +
       '<text x="' + (sx(mean) + 6).toFixed(1) + '" y="' + (y1 + 14) + '" font-size="13" fill="#C0392B">mean = ' + round(mean, 2) + '</text>';
-    xt.forEach(function (v) { if (v < mn - 1e-9 || v > mx + 1e-9) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="#1B1E19"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="#1B1E19">' + v + '</text>'; });
-    yt.forEach(function (v) { s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
-    s += '<text x="' + x1 + '" y="' + (y1 - 12) + '" text-anchor="end" font-size="13" fill="#59634F">n = ' + vals.length + ' · SD = ' + round(Math.sqrt(vals.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / Math.max(1, vals.length - 1)), 2) + '</text>';
+    xt.forEach(function (v) { if (v < mn - 1e-9 || v > mx + 1e-9) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="var(--text-primary)"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="var(--text-primary)">' + v + '</text>'; });
+    yt.forEach(function (v) { s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="var(--text-primary)"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="var(--text-primary)">' + v + '</text>'; });
+    s += '<text x="' + x1 + '" y="' + (y1 - 12) + '" text-anchor="end" font-size="13" fill="var(--text-secondary)">n = ' + vals.length + ' · SD = ' + round(Math.sqrt(vals.reduce(function (a, b) { return a + Math.pow(b - mean, 2); }, 0) / Math.max(1, vals.length - 1)), 2) + '</text>';
     return s + '</svg>';
   }
 
@@ -3149,7 +3173,7 @@
     var sy = function (v) { return y0 - (v - lo) / (hi - lo) * (y0 - y1); };
     var bwid = (x1 - x0) / groups.length, box = Math.min(64, bwid * 0.5);
     var s = svgOpen() + svgFrame(title, xlab, tName + (unit ? ' (' + unit + ')' : ''));
-    yt.forEach(function (v) { if (v < lo || v > hi) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    yt.forEach(function (v) { if (v < lo || v > hi) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="var(--text-primary)"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="var(--text-primary)">' + v + '</text>'; });
     var pal = ['#3B6D11', '#C0392B', '#2f6fb0', '#B0721A', '#6D4C41', '#00838F'];
     groups.forEach(function (g, i) {
       var cx = x0 + bwid * (i + 0.5), sorted = g.vals.slice().sort(function (a, b) { return a - b; });
@@ -3162,16 +3186,16 @@
       s += '<line x1="' + cx + '" y1="' + sy(wlo).toFixed(1) + '" x2="' + cx + '" y2="' + sy(whi).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
         '<line x1="' + (cx - box / 3) + '" y1="' + sy(whi).toFixed(1) + '" x2="' + (cx + box / 3) + '" y2="' + sy(whi).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
         '<line x1="' + (cx - box / 3) + '" y1="' + sy(wlo).toFixed(1) + '" x2="' + (cx + box / 3) + '" y2="' + sy(wlo).toFixed(1) + '" stroke="' + col + '" stroke-width="1.2"/>' +
-        '<rect x="' + (cx - box / 2) + '" y="' + sy(q3).toFixed(1) + '" width="' + box + '" height="' + Math.max(1, sy(q1) - sy(q3)).toFixed(1) + '" fill="#ffffff" stroke="' + col + '" stroke-width="1.5"/>' +
+        '<rect x="' + (cx - box / 2) + '" y="' + sy(q3).toFixed(1) + '" width="' + box + '" height="' + Math.max(1, sy(q1) - sy(q3)).toFixed(1) + '" fill="var(--surface-2)" stroke="' + col + '" stroke-width="1.5"/>' +
         '<line x1="' + (cx - box / 2) + '" y1="' + sy(q2).toFixed(1) + '" x2="' + (cx + box / 2) + '" y2="' + sy(q2).toFixed(1) + '" stroke="' + col + '" stroke-width="2"/>';
       sorted.forEach(function (v) { if (v < q1 - 1.5 * iqr || v > q3 + 1.5 * iqr) s += '<circle cx="' + cx + '" cy="' + sy(v).toFixed(1) + '" r="2.6" fill="none" stroke="' + col + '"/>'; });
       var lbl = g.name.length > 9 ? g.name.slice(0, 8) + '…' : g.name;
-      s += '<text x="' + cx + '" y="' + (y0 + 20) + '" text-anchor="middle" font-size="12" fill="#1B1E19"' + (groups.length > 8 ? ' transform="rotate(-35 ' + cx + ' ' + (y0 + 20) + ')"' : '') + '>' + axLabel(lbl) + '</text>' +
-        '<text x="' + cx + '" y="' + (y0 + 38) + '" text-anchor="middle" font-size="10" fill="#8C9583">n=' + g.vals.length + '</text>';
+      s += '<text x="' + cx + '" y="' + (y0 + 20) + '" text-anchor="middle" font-size="12" fill="var(--text-primary)"' + (groups.length > 8 ? ' transform="rotate(-35 ' + cx + ' ' + (y0 + 20) + ')"' : '') + '>' + axLabel(lbl) + '</text>' +
+        '<text x="' + cx + '" y="' + (y0 + 38) + '" text-anchor="middle" font-size="10" fill="var(--text-muted)">n=' + g.vals.length + '</text>';
     });
     if (groups.length >= 2) {
       var an = anova1(groups.map(function (g) { return g.vals; }));
-      if (an && isFinite(an.F)) s += '<text x="' + ((x0 + x1) / 2) + '" y="' + (y1 - 12) + '" text-anchor="middle" font-size="14" fill="#1B1E19">' + (groups.length === 2 ? 't-test' : 'ANOVA') + ', ' + pTxt(an.p) + '</text>';
+      if (an && isFinite(an.F)) s += '<text x="' + ((x0 + x1) / 2) + '" y="' + (y1 - 12) + '" text-anchor="middle" font-size="14" fill="var(--text-primary)">' + (groups.length === 2 ? 't-test' : 'ANOVA') + ', ' + pTxt(an.p) + '</text>';
     }
     return s + '</svg>';
   }
@@ -3190,8 +3214,8 @@
     var sx = function (v) { return x0 + (v - xmn) / (xmx - xmn) * (x1 - x0); };
     var sy = function (v) { return y0 - (v - ymn) / (ymx - ymn) * (y0 - y1); };
     var s = svgOpen() + svgFrame(title, xName + (xUnit ? ' (' + xUnit + ')' : ''), yName + (yUnit ? ' (' + yUnit + ')' : ''));
-    niceTicks(xmn, xmx, 6).forEach(function (v) { if (v < xmn || v > xmx) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="#1B1E19"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="#1B1E19">' + v + '</text>'; });
-    niceTicks(ymn, ymx, 6).forEach(function (v) { if (v < ymn || v > ymx) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="#1B1E19"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="#1B1E19">' + v + '</text>'; });
+    niceTicks(xmn, xmx, 6).forEach(function (v) { if (v < xmn || v > xmx) return; s += '<line x1="' + sx(v).toFixed(1) + '" y1="' + y0 + '" x2="' + sx(v).toFixed(1) + '" y2="' + (y0 + 5) + '" stroke="var(--text-primary)"/><text x="' + sx(v).toFixed(1) + '" y="' + (y0 + 22) + '" text-anchor="middle" font-size="13" fill="var(--text-primary)">' + v + '</text>'; });
+    niceTicks(ymn, ymx, 6).forEach(function (v) { if (v < ymn || v > ymx) return; s += '<line x1="' + (x0 - 5) + '" y1="' + sy(v).toFixed(1) + '" x2="' + x0 + '" y2="' + sy(v).toFixed(1) + '" stroke="var(--text-primary)"/><text x="' + (x0 - 10) + '" y="' + (sy(v) + 4).toFixed(1) + '" text-anchor="end" font-size="13" fill="var(--text-primary)">' + v + '</text>'; });
     var st = pearson(xs, ys);
     if (st) {
       // 95% confidence band for the regression line
@@ -3203,11 +3227,11 @@
         up.push(sx(xv).toFixed(1) + ',' + sy(yv + tcrit * se).toFixed(1));
         dn.push(sx(xv).toFixed(1) + ',' + sy(yv - tcrit * se).toFixed(1));
       }
-      s += '<polygon points="' + up.join(' ') + ' ' + dn.reverse().join(' ') + '" fill="#B9C4AE" fill-opacity="0.45"/>';
+      s += '<polygon points="' + up.join(' ') + ' ' + dn.reverse().join(' ') + '" fill="var(--border-strong)" fill-opacity="0.45"/>';
       s += '<line x1="' + sx(xmn).toFixed(1) + '" y1="' + sy(st.intercept + st.slope * xmn).toFixed(1) + '" x2="' + sx(xmx).toFixed(1) + '" y2="' + sy(st.intercept + st.slope * xmx).toFixed(1) + '" stroke="#1B3A6B" stroke-width="2"/>';
     }
-    pts.forEach(function (p) { s += '<circle cx="' + sx(p.x).toFixed(1) + '" cy="' + sy(p.y).toFixed(1) + '" r="3.6" fill="#3B6D11" fill-opacity="0.55" stroke="#27500A" stroke-width="0.8"/>'; });
-    if (st) s += '<text x="' + (x0 + 10) + '" y="' + (y1 - 12) + '" font-size="14" fill="#1B1E19">R = ' + round(st.r, 3) + ', ' + pTxt(st.p) + ' (n = ' + st.n + ')</text>';
+    pts.forEach(function (p) { s += '<circle cx="' + sx(p.x).toFixed(1) + '" cy="' + sy(p.y).toFixed(1) + '" r="3.6" fill="var(--green-d)" fill-opacity="0.55" stroke="var(--green-ink)" stroke-width="0.8"/>'; });
+    if (st) s += '<text x="' + (x0 + 10) + '" y="' + (y1 - 12) + '" font-size="14" fill="var(--text-primary)">R = ' + round(st.r, 3) + ', ' + pTxt(st.p) + ' (n = ' + st.n + ')</text>';
     return s + '</svg>';
   }
   // ---------- ggarrange: combine charts into one page ----------
@@ -3217,16 +3241,33 @@
     cols = Math.max(1, Math.min(2, cols || 1));
     var rows = Math.ceil(list.length / cols);
     var W = CW * cols, H = CH * rows;
-    var s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + W + '" height="' + H + '" fill="#ffffff"/>';
+    var s = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="Helvetica, Arial, \'Noto Sans KR\', sans-serif"><rect width="' + W + '" height="' + H + '" fill="var(--surface-2)"/>';
     var letters = 'ABCDEFGH';
     list.forEach(function (item, i) {
       var cx = (i % cols) * CW, cy = Math.floor(i / cols) * CH;
       s += '<g transform="translate(' + cx + ',' + cy + ')">' + svgInner(item.svg) +
-        (noLetters ? '' : '<text x="16" y="30" font-size="23" font-weight="700" fill="#1B1E19">' + letters[i] + '</text>') + '</g>';
+        (noLetters ? '' : '<text x="16" y="30" font-size="23" font-weight="700" fill="var(--text-primary)">' + letters[i] + '</text>') + '</g>';
     });
     return s + '</svg>';
   }
+  /* 저장하는 그래프는 논문용 흰 배경 그대로 — 화면 색과 상관없이 */
+  var LIGHT_HEX = {
+    'surface-1': '#F4F6F2', 'surface-2': '#FFFFFF', 'bg': '#ECEFE8',
+    'border': '#E4E7E0', 'border-strong': '#C9CFC3',
+    'text-primary': '#1B1E19', 'text-secondary': '#59634F', 'text-muted': '#8C9583',
+    'green': '#639922', 'green-d': '#3B6D11', 'green-t': '#EAF3DE', 'green-cell': '#F1F6E8',
+    'green-ink': '#27500A', 'green-tbr': '#CFE0BA', 'green-ink-fill': '#27500A',
+    'amber-bg': '#FAEEDA', 'amber-ink': '#8A5A12', 'amber': '#B0721A', 'amber-br': '#EAD6A8',
+    'gold': '#C08A2B', 'gold-lite': '#E8B84B',
+    'danger': '#C0392B', 'danger-fill': '#C0392B', 'danger-br': '#E3B4AE', 'on-green': '#FFFFFF'
+  };
+  function svgLight(s) {
+    return String(s == null ? '' : s).replace(/var\(--([a-z0-9-]+)\)/g, function (m, k) {
+      return LIGHT_HEX[k] || '#1B1E19';
+    });
+  }
   function svgToPng(svgStr, w, h, filename) {
+    svgStr = svgLight(svgStr);
     try {
       var blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
       var url = URL.createObjectURL(blob), img = new Image();
@@ -3391,37 +3432,37 @@
     var opts = '';
     if (c.type === 'box') {
       opts = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-secondary)">그룹</span>' +
-        [['rep', '반복'], ['sel', '선발 여부'], ['line', '조합·계통']].map(function (m) { return '<button class="btn chGrp" data-m="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.group || 'rep') === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
+        [['rep', '반복'], ['sel', '선발 여부'], ['line', '조합·계통']].map(function (m) { return '<button class="btn chGrp" data-m="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.group || 'rep') === m[0] ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
     } else if (c.type === 'scatter') {
       var sel = function (id, cur) { return '<select class="ein ' + id + '" style="height:36px;font-size:12px;flex:1">' + meas.map(function (m) { return '<option value="' + m.id + '"' + (m.id === cur ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('') + '</select>'; };
       opts = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px"><span style="font-size:11px;color:var(--text-secondary);flex:0 0 18px">X</span>' + sel('chX', c.x) + '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 18px">Y</span>' + sel('chY', c.y) + '</div>';
     }
     var set = S.chartSet || (S.chartSet = []);
     var setHtml = '<div style="margin-top:16px;border-top:0.5px solid var(--border);padding-top:12px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">그래프 모음 <span style="color:var(--text-muted);font-weight:400">· 여러 장을 한 페이지로</span></span><span style="font-size:12px;color:#3B6D11;font-weight:600">' + set.length + '장</span></div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:600">그래프 모음 <span style="color:var(--text-muted);font-weight:400">· 여러 장을 한 페이지로</span></span><span style="font-size:12px;color:var(--green-d);font-weight:600">' + set.length + '장</span></div>' +
       '<button class="btn" id="chAdd" style="width:100%;height:44px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('plus', 'var(--text-primary)', 16) + ' 현재 그래프 담기</button>';
     if (set.length) {
       setHtml += '<div style="margin-top:8px">' + set.map(function (it, i) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--surface-1);border-radius:9px;margin-bottom:6px"><span style="font-size:13px;font-weight:700;color:#27500A;width:16px">' + 'ABCDEFGH'[i] + '</span><span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.name) + '</span><button class="btn chDel" data-i="' + i + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 14) + '</button></div>';
+        return '<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--surface-1);border-radius:9px;margin-bottom:6px"><span style="font-size:13px;font-weight:700;color:var(--green-ink);width:16px">' + 'ABCDEFGH'[i] + '</span><span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(it.name) + '</span><button class="btn chDel" data-i="' + i + '" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;color:var(--danger);border-color:var(--danger-br)">' + ico('circle-x', 'var(--danger)', 14) + '</button></div>';
       }).join('') + '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="font-size:11px;color:var(--text-secondary)">배치</span>' +
-          [[1, '세로 1열'], [2, '2열 격자']].map(function (m) { return '<button class="btn chCols" data-c="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((S.chartCols || 2) === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') +
+          [[1, '세로 1열'], [2, '2열 격자']].map(function (m) { return '<button class="btn chCols" data-c="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((S.chartCols || 2) === m[0] ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + m[1] + '</button>'; }).join('') +
         '</div>' +
-        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="chArrPng" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 PNG</button><button class="btn" id="chArrSvg" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 SVG</button><button class="btn" id="chClear" style="flex:0 0 74px;height:44px;font-size:13px;color:#C0392B;border-color:#E3B4AE">비우기</button></div>' +
-        '<div id="chArrPrev" style="margin-top:10px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:#fff"></div>';
+        '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="chArrPng" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 PNG</button><button class="btn" id="chArrSvg" style="flex:1;height:44px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('download', 'var(--text-primary)', 16) + ' 모음 SVG</button><button class="btn" id="chClear" style="flex:0 0 74px;height:44px;font-size:13px;color:var(--danger);border-color:var(--danger-br)">비우기</button></div>' +
+        '<div id="chArrPrev" style="margin-top:10px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:var(--surface-2)"></div>';
     }
     setHtml += '</div>';
     var facetOpts = [['none', '없음'], ['rep', '반복별'], ['sel', '선발 여부']];
     if ((g.surveyDates || []).length > 1) facetOpts.push(['date', '조사일별']);
     var facetHtml = '<div style="display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-secondary)">격자 분할</span>' +
-      facetOpts.map(function (m) { return '<button class="btn chFac" data-f="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.facet || 'none') === m[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
+      facetOpts.map(function (m) { return '<button class="btn chFac" data-f="' + m[0] + '" style="padding:5px 11px;font-size:12px;border-radius:15px' + ((c.facet || 'none') === m[0] ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink)' : '') + '">' + m[1] + '</button>'; }).join('') + '</div>';
     body.innerHTML =
-      '<div style="display:flex;gap:8px">' + types.map(function (ty2) { return '<button class="btn chType" data-t="' + ty2[0] + '" style="flex:1;height:40px;font-size:13px' + (c.type === ty2[0] ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + ty2[1] + '</button>'; }).join('') + '</div>' +
+      '<div style="display:flex;gap:8px">' + types.map(function (ty2) { return '<button class="btn chType" data-t="' + ty2[0] + '" style="flex:1;height:40px;font-size:13px' + (c.type === ty2[0] ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + ty2[1] + '</button>'; }).join('') + '</div>' +
       opts + facetHtml +
-      '<div id="chWrap" style="margin-top:12px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:#fff"></div>' +
+      '<div id="chWrap" style="margin-top:12px;border:0.5px solid var(--border);border-radius:12px;overflow:auto;background:var(--surface-2)"></div>' +
       '<div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="chPng" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' PNG 저장</button><button class="btn" id="chSvg" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' SVG 저장</button></div>' +
       setHtml +
-      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">논문용 스타일(흰 배경·검은 축)로 그립니다. 히스토그램은 평균선, 박스플롯은 ANOVA·t검정 p값, 산점도는 회귀선·95% 신뢰구간과 상관계수 R·p를 표시합니다.' + (c.type === 'box' && (c.group || 'rep') === 'line' ? ' 계통이 많으면 앞 12개만 표시됩니다.' : '') + '</div>';
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">논문용 스타일(흰 배경·검은 축)로 저장됩니다. 화면이 어두울 때는 화면에서만 어둡게 보이고, 저장하는 그림은 늘 흰 배경입니다. 히스토그램은 평균선, 박스플롯은 ANOVA·t검정 p값, 산점도는 회귀선·95% 신뢰구간과 상관계수 R·p를 표시합니다.' + (c.type === 'box' && (c.group || 'rep') === 'line' ? ' 계통이 많으면 앞 12개만 표시됩니다.' : '') + '</div>';
     var svg = null;
     try { svg = currentChartSVG(); } catch (e) { svg = null; }
     $('chWrap').innerHTML = svg ? '<div style="min-width:520px">' + svg.replace(/width="\d+" height="\d+"/, 'width="100%" height="auto"') + '</div>'
@@ -3438,7 +3479,7 @@
       var sv = null; try { sv = currentChartSVG(); } catch (e) {}
       if (!sv) { toast('담을 그래프가 없습니다'); return; }
       if (S.chartSet.length >= 8) { toast('최대 8장까지 담을 수 있습니다'); return; }
-      S.chartSet.push({ svg: sv, name: chartLabelName() });
+      S.chartSet.push({ svg: svgLight(sv), name: chartLabelName() });
       toast('담김 · 총 ' + S.chartSet.length + '장'); renderAnBody();
     };
     document.querySelectorAll('.chDel').forEach(function (b) { b.onclick = function () { S.chartSet.splice(+b.getAttribute('data-i'), 1); renderAnBody(); }; });
@@ -3449,7 +3490,7 @@
       var rowsN = Math.ceil(S.chartSet.length / Math.min(2, cols));
       $('chArrPrev').innerHTML = comb ? '<div style="min-width:520px">' + comb.replace(/width="\d+" height="\d+"/, 'width="100%" height="auto"') + '</div>' : '';
       if ($('chArrPng')) $('chArrPng').onclick = function () { svgToPng(comb, CW * Math.min(2, cols), CH * rowsN, arrangeFileName('png')); };
-      if ($('chArrSvg')) $('chArrSvg').onclick = function () { downloadBlob(new Blob([comb], { type: 'image/svg+xml;charset=utf-8' }), arrangeFileName('svg')); toast('SVG 저장됨'); };
+      if ($('chArrSvg')) $('chArrSvg').onclick = function () { downloadBlob(new Blob([svgLight(comb)], { type: 'image/svg+xml;charset=utf-8' }), arrangeFileName('svg')); toast('SVG 저장됨'); };
     }
   }
   function chartLabelName() {
@@ -3472,9 +3513,9 @@
     var svg = null;
     try { svg = currentChartSVG(); } catch (e) {}
     if (!svg) { toast('저장할 그래프가 없습니다'); return; }
-    if (kind === 'svg') { downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), chartFileName('svg')); toast('SVG 저장됨'); return; }
+    if (kind === 'svg') { downloadBlob(new Blob([svgLight(svg)], { type: 'image/svg+xml;charset=utf-8' }), chartFileName('svg')); toast('SVG 저장됨'); return; }
     try {
-      var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      var blob = new Blob([svgLight(svg)], { type: 'image/svg+xml;charset=utf-8' });
       var url = URL.createObjectURL(blob), img = new Image();
       img.onload = function () {
         var sc = 2, cv = document.createElement('canvas'); cv.width = CW * sc; cv.height = CH * sc;
@@ -3613,14 +3654,14 @@
     v.innerHTML =
       '<div style="padding:14px 16px 8px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">분석</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">' + esc(g.projName) + ' · ' + esc(g.label) + (g.crop ? ' · ' + esc(g.crop) : '') + '</div></div>' +
       '<div style="display:flex;gap:8px;padding:10px 14px 2px">' +
-        '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">요약 · 통계</button>' +
-        '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">그래프 생성</button>' +
-        '<button class="btn anTab" data-t="audpc" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'audpc' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">AUDPC</button>' +
+        '<button class="btn anTab" data-t="stat" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'stat' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">요약 · 통계</button>' +
+        '<button class="btn anTab" data-t="chart" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'chart' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">그래프 생성</button>' +
+        '<button class="btn anTab" data-t="audpc" style="flex:1;height:38px;font-size:13px' + (S.anTab === 'audpc' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">AUDPC</button>' +
       '</div>' +
       '<div style="display:flex;gap:8px;padding:8px 14px 2px;align-items:center">' +
         '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">분석 대상</span>' +
-        '<button class="btn anScope" data-s="all" style="flex:1;height:34px;font-size:12px' + (S.anScope !== 'some' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">전체</button>' +
-        '<button class="btn anScope" data-s="some" style="flex:1;height:34px;font-size:12px' + (S.anScope === 'some' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">일부 선택</button>' +
+        '<button class="btn anScope" data-s="all" style="flex:1;height:34px;font-size:12px' + (S.anScope !== 'some' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">전체</button>' +
+        '<button class="btn anScope" data-s="some" style="flex:1;height:34px;font-size:12px' + (S.anScope === 'some' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">일부 선택</button>' +
       '</div>' +
       '<div id="anPick" style="padding:0 14px"></div>' +
       '<div class="scroll-x" id="anPills" style="padding:10px 14px 6px"></div>' +
@@ -3642,18 +3683,18 @@
     var nSel = rows.filter(function (r) { return sel[r.line.id]; }).length;
     if (!rows.length) { box.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:10px 2px">조사된 라벨번호가 없습니다.</div>'; return; }
     box.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px"><span style="font-size:11px;color:var(--text-secondary);flex:1">선택 <b style="color:#27500A">' + nSel + '</b> / ' + rows.length + ' · 행을 탭하거나 오른쪽 칸을 위아래로 <b>드래그</b></span>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px"><span style="font-size:11px;color:var(--text-secondary);flex:1">선택 <b style="color:var(--green-ink)">' + nSel + '</b> / ' + rows.length + ' · 행을 탭하거나 오른쪽 칸을 위아래로 <b>드래그</b></span>' +
         '<button class="btn" id="anAll" style="height:28px;padding:0 9px;font-size:11px">전체선택</button><button class="btn" id="anNone" style="height:28px;padding:0 9px;font-size:11px">해제</button></div>' +
       '<div style="max-height:190px;overflow:auto;border:0.5px solid var(--border);border-radius:10px">' +
       '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface-1);position:sticky;top:0;z-index:1">' +
       '<th style="text-align:left;padding:6px 9px">라벨번호</th><th style="text-align:center;padding:6px 6px;width:64px">개체수</th><th style="text-align:center;padding:6px 6px;width:86px">분석 적용</th></tr></thead><tbody id="anPickBody">' +
       rows.map(function (r, i) {
         var on = !!sel[r.line.id];
-        return '<tr class="anRow" data-id="' + esc(r.line.id) + '" data-i="' + i + '" style="border-top:0.5px solid var(--border);background:' + (on ? '#F1F6E8' : 'transparent') + '">' +
-          '<td style="padding:7px 9px;font-weight:500' + (on ? ';color:#27500A' : '') + '">' + esc(r.line.label) + '</td>' +
+        return '<tr class="anRow" data-id="' + esc(r.line.id) + '" data-i="' + i + '" style="border-top:0.5px solid var(--border);background:' + (on ? 'var(--green-cell)' : 'transparent') + '">' +
+          '<td style="padding:7px 9px;font-weight:500' + (on ? ';color:var(--green-ink)' : '') + '">' + esc(r.line.label) + '</td>' +
           '<td style="padding:7px 6px;text-align:center;color:var(--text-secondary)">' + r.n + '</td>' +
           '<td class="anCell" data-id="' + esc(r.line.id) + '" style="padding:7px 6px;text-align:center;touch-action:none;cursor:pointer">' +
-            '<span style="display:inline-flex;width:22px;height:22px;border-radius:6px;align-items:center;justify-content:center;border:1.2px solid ' + (on ? '#639922' : 'var(--border-strong)') + ';background:' + (on ? '#639922' : 'var(--surface-2)') + ';color:#fff;font-size:13px">' + (on ? '✓' : '') + '</span></td></tr>';
+            '<span style="display:inline-flex;width:22px;height:22px;border-radius:6px;align-items:center;justify-content:center;border:1.2px solid ' + (on ? 'var(--green)' : 'var(--border-strong)') + ';background:' + (on ? 'var(--green)' : 'var(--surface-2)') + ';color:#fff;font-size:13px">' + (on ? '✓' : '') + '</span></td></tr>';
       }).join('') + '</tbody></table></div>';
     $('anAll').onclick = function () { rows.forEach(function (r) { sel[r.line.id] = 1; }); renderAnPick(); renderAnBody(); };
     $('anNone').onclick = function () { rows.forEach(function (r) { delete sel[r.line.id]; }); renderAnPick(); renderAnBody(); };
@@ -3661,11 +3702,11 @@
     function paint() {
       box.querySelectorAll('.anRow').forEach(function (tr) {
         var on = !!sel[tr.getAttribute('data-id')];
-        tr.style.background = on ? '#F1F6E8' : 'transparent';
+        tr.style.background = on ? 'var(--green-cell)' : 'transparent';
         var td = tr.querySelector('td'), span = tr.querySelector('.anCell span');
-        td.style.color = on ? '#27500A' : '';
-        span.style.borderColor = on ? '#639922' : 'var(--border-strong)';
-        span.style.background = on ? '#639922' : 'var(--surface-2)';
+        td.style.color = on ? 'var(--green-ink)' : '';
+        span.style.borderColor = on ? 'var(--green)' : 'var(--border-strong)';
+        span.style.background = on ? 'var(--green)' : 'var(--surface-2)';
         span.textContent = on ? '✓' : '';
       });
       var cnt = box.querySelector('b'); if (cnt) cnt.textContent = rows.filter(function (r) { return sel[r.line.id]; }).length;
@@ -3693,7 +3734,7 @@
     var g = curGen(), p = $('anPills'); p.innerHTML = '';
     g.traits.forEach(function (t) {
       var b = document.createElement('button'); b.className = 'pill' + (t.id === S.anTrait ? ' on' : '');
-      b.innerHTML = esc(t.name) + (isMeasure(t) ? ' <i class="ti ti-chart-bar" style="font-size:11px;color:#3B6D11"></i>' : '');
+      b.innerHTML = esc(t.name) + (isMeasure(t) ? ' <i class="ti ti-chart-bar" style="font-size:11px;color:var(--green-d)"></i>' : '');
       b.onclick = function () { S.anTrait = t.id; renderAnPills(); renderAnDate(); renderAnBody(); };
       p.appendChild(b);
     });
@@ -3702,8 +3743,8 @@
     var g = curGen(), t = traitById(S.anTrait), bar = $('anDate'); bar.innerHTML = '';
     if (!t) return;
     if (S.anTab === 'audpc') { renderAudpcDates(bar, g); return; }
-    var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
-    g.surveyDates.forEach(function (d) { html += '<button class="btn anD" data-d="' + d + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (d === S.date ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + d + '</button>'; });
+    var html = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', 'var(--green-d)', 13) + ' <span style="font-size:11px;color:var(--text-secondary)">조사일</span>';
+    g.surveyDates.forEach(function (d) { html += '<button class="btn anD" data-d="' + d + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (d === S.date ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + d + '</button>'; });
     html += '</div>'; bar.innerHTML = html;
     bar.querySelectorAll('.anD').forEach(function (b) { b.onclick = function () { S.date = b.getAttribute('data-d'); renderAnDate(); renderAnBody(); }; });
   }
@@ -3712,11 +3753,11 @@
     var all = (g.surveyDates || []).slice();          // 만든 순서 그대로 (audpcDates 주석 참고)
     var picked = audpcDates(), on = {}; picked.forEach(function (d) { on[d] = 1; });
     bar.innerHTML =
-      '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', '#3B6D11', 13) +
-        '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">조사일 <b style="color:#27500A">' + picked.length + '</b>/' + all.length + ' 선택</span>' +
+      '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' + ico('calendar-event', 'var(--green-d)', 13) +
+        '<span style="font-size:11px;color:var(--text-secondary);flex:0 0 auto">조사일 <b style="color:var(--green-ink)">' + picked.length + '</b>/' + all.length + ' 선택</span>' +
         all.map(function (d) {
           var o = !!on[d];
-          return '<button class="btn apD" data-d="' + esc(d) + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (o ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : ';color:var(--text-muted)') + '">' + (o ? '✓ ' : '') + esc(d) + '</button>';
+          return '<button class="btn apD" data-d="' + esc(d) + '" style="padding:4px 10px;font-size:12px;border-radius:16px' + (o ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : ';color:var(--text-muted)') + '">' + (o ? '✓ ' : '') + esc(d) + '</button>';
         }).join('') +
         '<button class="btn" id="apAll" style="padding:4px 9px;font-size:11px;border-radius:16px;color:var(--text-secondary)">전체</button>' +
       '</div>';
@@ -3734,8 +3775,8 @@
     var mode = (S.audpcMode === 'line') ? 'line' : 'indiv';
     var modeBar =
       '<div style="display:flex;gap:8px;margin-bottom:10px">' +
-        '<button class="btn apMode" data-m="indiv" style="flex:1;height:36px;font-size:12.5px' + (mode === 'indiv' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">개체별</button>' +
-        '<button class="btn apMode" data-m="line" style="flex:1;height:36px;font-size:12.5px' + (mode === 'line' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">라벨번호 평균</button>' +
+        '<button class="btn apMode" data-m="indiv" style="flex:1;height:36px;font-size:12.5px' + (mode === 'indiv' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">개체별</button>' +
+        '<button class="btn apMode" data-m="line" style="flex:1;height:36px;font-size:12.5px' + (mode === 'line' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">라벨번호 평균</button>' +
       '</div>';
     var wire = function () {
       body.querySelectorAll('.apMode').forEach(function (b) {
@@ -3765,7 +3806,7 @@
 
     var head =
       '<div style="font-size:11px;color:var(--text-secondary);line-height:1.7;background:var(--surface-1);border-radius:10px;padding:9px 11px">' +
-        ico('chart-bar', '#3B6D11', 13) + ' <b>' + esc(t.name) + '</b> · 조사일 ' + dates.map(esc).join(' → ') + '<br>' +
+        ico('chart-bar', 'var(--green-d)', 13) + ' <b>' + esc(t.name) + '</b> · 조사일 ' + dates.map(esc).join(' → ') + '<br>' +
         (mode === 'line'
           ? '조사일마다 <b>라벨번호 안 개체들의 값을 먼저 평균</b> 낸 뒤, 그 평균값 곡선으로 면적을 구했습니다.'
           : '<b>개체마다</b> 따로 면적을 구했습니다.') +
@@ -3779,7 +3820,7 @@
         '<button class="btn" id="apCsv" style="height:30px;padding:0 10px;font-size:11.5px;display:inline-flex;align-items:center;gap:4px">' + ico('download', 'var(--text-primary)', 13) + ' CSV</button>' +
       '</div>';
 
-    var note = '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">‘조사’ 칸은 실제로 쓰인 조사일 수입니다. 고른 날 수(' + dates.length + ')보다 적으면 <span style="color:#B0721A">주황색</span>으로 표시됩니다.</div>';
+    var note = '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.6">‘조사’ 칸은 실제로 쓰인 조사일 수입니다. 고른 날 수(' + dates.length + ')보다 적으면 <span style="color:var(--amber)">주황색</span>으로 표시됩니다.</div>';
 
     if (mode === 'line') {
       body.innerHTML = modeBar + head +
@@ -3794,8 +3835,8 @@
             return '<tr style="border-top:0.5px solid var(--border)">' +
               '<td style="padding:6px 9px">' + esc(r.line.label) + (r.line.pedigree ? ' <span style="color:var(--text-muted)">' + esc(r.line.pedigree) + '</span>' : '') + '</td>' +
               '<td style="padding:6px 4px;text-align:center;color:var(--text-secondary)">' + r.indivN + '</td>' +
-              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? '#B0721A' : 'var(--text-muted)') + '">' + r.n + '</td>' +
-              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:#27500A">' + r1(r.audpc) + '</td></tr>';
+              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? 'var(--amber)' : 'var(--text-muted)') + '">' + r.n + '</td>' +
+              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green-ink)">' + r1(r.audpc) + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
         note +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.6">‘개체’ 칸은 평균에 쓰인 개체 수(가장 많은 날 기준)입니다.</div>';
@@ -3814,8 +3855,8 @@
             return '<tr style="border-top:0.5px solid var(--border)">' +
               '<td style="padding:6px 9px">' + esc(r.line.label) + (r.line.pedigree ? ' <span style="color:var(--text-muted)">' + esc(r.line.pedigree) + '</span>' : '') + '</td>' +
               '<td style="padding:6px 4px;text-align:center;color:var(--text-secondary)">' + r.indiv + '</td>' +
-              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? '#B0721A' : 'var(--text-muted)') + '">' + r.n + '</td>' +
-              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:#27500A">' + r1(r.audpc) + '</td></tr>';
+              '<td style="padding:6px 4px;text-align:center;color:' + (r.n < dates.length ? 'var(--amber)' : 'var(--text-muted)') + '">' + r.n + '</td>' +
+              '<td style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green-ink)">' + r1(r.audpc) + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
         note +
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-top:16px;margin-bottom:6px">라벨번호별 평균 <span style="color:var(--text-muted);font-weight:400">· 개체 AUDPC 들의 평균</span></div>' +
@@ -3878,14 +3919,14 @@
     var html = '<div class="card" style="margin:0 0 10px"><div style="display:flex;gap:6px;flex-wrap:wrap">' +
       stcell('개체 수', n) + stcell('평균', round(mean, 2) + (t.unit && t.unit !== '%' ? '' : (t.unit || ''))) + stcell('표준편차', round(sd, 2)) + stcell('범위', round(mn, 1) + '–' + round(mx, 1)) + stcell('CV%', round(cv, 1)) + '</div></div>';
     if (an) {
-      html += '<div class="card" style="margin:0 0 10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('chart-bar', '#639922', 14) + ' 분산분석 · 유전력 <span style="font-size:10px;color:var(--text-muted);font-weight:400">(라벨번호 효과 · 개체 반복)</span></div><div style="font-size:13px;line-height:2;color:var(--text-secondary)">F = <b style="color:var(--text-primary)">' + round(an.F, 2) + '</b> · p = <b style="color:' + (an.p < 0.05 ? '#3B6D11' : 'var(--text-primary)') + '">' + (an.p < 0.001 ? '<0.001' : round(an.p, 3)) + '</b>' + (an.p < 0.05 ? ' <span style="color:#3B6D11">라벨번호 간 유의차</span>' : ' <span style="color:var(--text-muted)">유의차 없음</span>') + '<br>오차 MSe = ' + round(an.mse, 2) + ' · CV% = ' + round(an.cv, 1) + '<br>유전력 H² <span style="font-size:10px;color:var(--text-muted)">(개체평균 기준)</span> = <b style="color:#27500A">' + round(Math.max(0, Math.min(1, an.h2)), 2) + '</b></div></div>';
+      html += '<div class="card" style="margin:0 0 10px"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('chart-bar', 'var(--green)', 14) + ' 분산분석 · 유전력 <span style="font-size:10px;color:var(--text-muted);font-weight:400">(라벨번호 효과 · 개체 반복)</span></div><div style="font-size:13px;line-height:2;color:var(--text-secondary)">F = <b style="color:var(--text-primary)">' + round(an.F, 2) + '</b> · p = <b style="color:' + (an.p < 0.05 ? 'var(--green-d)' : 'var(--text-primary)') + '">' + (an.p < 0.001 ? '<0.001' : round(an.p, 3)) + '</b>' + (an.p < 0.05 ? ' <span style="color:var(--green-d)">라벨번호 간 유의차</span>' : ' <span style="color:var(--text-muted)">유의차 없음</span>') + '<br>오차 MSe = ' + round(an.mse, 2) + ' · CV% = ' + round(an.cv, 1) + '<br>유전력 H² <span style="font-size:10px;color:var(--text-muted)">(개체평균 기준)</span> = <b style="color:var(--green-ink)">' + round(Math.max(0, Math.min(1, an.h2)), 2) + '</b></div></div>';
     } else {
       html += '<div class="card" style="margin:0 0 10px;font-size:12px;color:var(--text-muted);line-height:1.6">라벨번호당 개체(반복)가 부족해 분산분석·유전력은 계산할 수 없습니다. 라벨번호당 2개 이상 개체를 입력하면 F·p·H²·Tukey가 표시됩니다.</div>';
     }
     html += '<div style="font-size:12px;font-weight:600;margin:4px 0 8px">라벨번호 순위 <span style="font-size:10px;color:var(--text-muted);font-weight:400">평균 내림차순' + (letters.some(function (x) { return x; }) ? ' · 같은 문자=Tukey 유의차 없음' : '') + '</span></div>';
     html += ranked.map(function (o, i) {
       var w = maxM > minM ? ((o.mean - minM) / (maxM - minM) * 94 + 6) : 100; var sel = o.line.selected;
-      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:74px;flex:0 0 auto;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + (sel ? 'color:#27500A;font-weight:600' : '') + '">' + (sel ? '<i class="ti ti-star-filled" style="font-size:11px;color:#C08A2B"></i> ' : '') + esc(o.line.label) + '</div><div style="flex:1;height:20px;background:var(--surface-1);border-radius:5px;overflow:hidden"><div style="width:' + w + '%;height:100%;background:' + (sel ? '#C08A2B' : '#639922') + '"></div></div><div style="width:78px;flex:0 0 auto;text-align:right;font-size:12px">' + round(o.mean, 1) + ' <b style="color:#3B6D11">' + letters[i] + '</b></div></div>';
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:74px;flex:0 0 auto;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + (sel ? 'color:var(--green-ink);font-weight:600' : '') + '">' + (sel ? '<i class="ti ti-star-filled" style="font-size:11px;color:var(--gold)"></i> ' : '') + esc(o.line.label) + '</div><div style="flex:1;height:20px;background:var(--surface-1);border-radius:5px;overflow:hidden"><div style="width:' + w + '%;height:100%;background:' + (sel ? 'var(--gold)' : 'var(--green)') + '"></div></div><div style="width:78px;flex:0 0 auto;text-align:right;font-size:12px">' + round(o.mean, 1) + ' <b style="color:var(--green-d)">' + letters[i] + '</b></div></div>';
     }).join('');
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">라벨번호 ' + ranked.length + '개 · 선발 ' + ranked.filter(function (o) { return o.line.selected; }).length + '개 · 결측·복잡한 설계는 CSV로 내보내 R에서 분석 권장</div>';
     body.innerHTML = html;
@@ -3898,7 +3939,7 @@
     var html = '<div class="card" style="margin:0 0 10px;font-size:12px;font-weight:600">' + esc(t.name) + ' 분포 <span style="color:var(--text-muted);font-weight:400">· 총 ' + total + '</span></div>';
     html += cats.map(function (c) {
       var nn = counts[c] || 0, pct = total ? nn / total * 100 : 0;
-      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:90px;flex:0 0 auto;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c) + '</div><div style="flex:1;height:20px;background:var(--surface-1);border-radius:5px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:#639922"></div></div><div style="width:66px;text-align:right;font-size:12px">' + nn + ' (' + Math.round(pct) + '%)</div></div>';
+      return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="width:90px;flex:0 0 auto;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(c) + '</div><div style="flex:1;height:20px;background:var(--surface-1);border-radius:5px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:var(--green)"></div></div><div style="width:66px;text-align:right;font-size:12px">' + nn + ' (' + Math.round(pct) + '%)</div></div>';
     }).join('');
     html += '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">항목형·등급(문자) 형질은 빈도 분포로 표시됩니다. 범주 연관성은 카이제곱 검정을 권장합니다.</div>';
     body.innerHTML = html;
@@ -4167,10 +4208,10 @@
       $('bReset').onclick = function () { S.bulkStage = 'idle'; S.bulkRows = null; renderBulk(); };
       $('bApply').onclick = applyBulk;
     } else {
-      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', '#639922', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
+      v.innerHTML = head + '<div style="flex:1;padding:14px 14px;overflow:auto"><div class="card"><div style="font-size:12px;font-weight:600;margin-bottom:8px">' + ico('table', 'var(--green)', 14) + ' 파일 형식 (엑셀 · CSV · PDF · 사진)</div><div style="font-size:12px;color:var(--text-secondary);line-height:1.7">첫 줄은 머리글, 이후 한 줄에 한 계통. <b>라벨번호</b>만 있으면 되고 <b>품종명/Pedigree·세대·반복·개체수</b>는 선택입니다.</div>' +
         '<div style="margin-top:10px;font-family:ui-monospace,monospace;font-size:11px;background:var(--surface-2);border:0.5px solid var(--border);border-radius:8px;padding:9px 10px;color:var(--text-secondary);white-space:pre">라벨번호,품종명/Pedigree,세대,반복,개체수\n' + esc(bulkPrefix(g)) + '-0001,금강/IT12345,' + esc(g.label) + ',1,10\n' + esc(bulkPrefix(g)) + '-0002,새금강/IT12346,' + esc(g.label) + ',2,10</div></div>' +
         '<button class="btn" id="bTpl" style="width:100%;height:46px;font-size:14px;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('file-download', 'var(--text-primary)', 16) + ' 빈 양식 내려받기</button>' +
-        '<button class="btn primary" id="bPick" style="width:100%;height:52px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', '#fff', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
+        '<button class="btn primary" id="bPick" style="width:100%;height:52px;font-size:15px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-spreadsheet', 'var(--on-green)', 18) + ' 파일 선택 (엑셀·CSV·PDF)</button>' +
         '<button class="btn" id="bShot" style="width:100%;height:48px;font-size:14px;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--text-primary)', 17) + ' 종이 표 촬영해서 인식</button>' +
         '<input type="file" id="bCam" accept="image/*" capture="environment" style="display:none">' +
         '<input type="file" id="bFile" accept=".xlsx,.xls,.csv,.tsv,.txt,.pdf,image/*" style="display:none">' +
@@ -4215,8 +4256,8 @@
     var bodyInner = '';
     if (o.stage === 'idle') {
       bodyInner =
-        '<div class="card" style="text-align:center;padding:26px 16px"><div style="width:64px;height:64px;border-radius:16px;background:#EAF3DE;display:flex;align-items:center;justify-content:center;margin:0 auto 14px">' + ico('camera', '#639922', 32) + '</div><div style="font-size:14px;font-weight:500">라벨을 촬영하세요</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.6">인쇄된 영문·숫자 라벨(예: ' + esc(g.prefix || 'CU') + '24-001) 인식에 최적화되어 있습니다. 밝고 반듯하게, 라벨이 화면을 꽉 채우도록 찍으면 정확합니다.</div></div>' +
-        '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" id="oShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 카메라 촬영</button>' +
+        '<div class="card" style="text-align:center;padding:26px 16px"><div style="width:64px;height:64px;border-radius:16px;background:var(--green-t);display:flex;align-items:center;justify-content:center;margin:0 auto 14px">' + ico('camera', 'var(--green)', 32) + '</div><div style="font-size:14px;font-weight:500">라벨을 촬영하세요</div><div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.6">인쇄된 영문·숫자 라벨(예: ' + esc(g.prefix || 'CU') + '24-001) 인식에 최적화되어 있습니다. 밝고 반듯하게, 라벨이 화면을 꽉 채우도록 찍으면 정확합니다.</div></div>' +
+        '<div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" id="oShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--on-green)', 20) + ' 카메라 촬영</button>' +
         '<button class="btn" id="oPick" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('photo', 'var(--text-primary)', 20) + ' 앨범에서 선택</button></div>' +
         '<input type="file" id="oFile" accept="image/*" capture="environment" style="display:none">' +
         '<input type="file" id="oPickFile" accept="image/*" style="display:none">' +
@@ -4224,7 +4265,7 @@
     } else if (o.stage === 'running') {
       bodyInner =
         (o.img ? '<img src="' + o.img + '" style="width:100%;max-height:220px;object-fit:contain;border-radius:12px;border:0.5px solid var(--border);background:#000">' : '') +
-        '<div class="card" style="margin-top:12px;text-align:center;padding:22px 16px"><div style="font-size:14px;font-weight:500">인식 중…</div><div style="height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;margin-top:12px"><div style="width:' + Math.round((o.prog || 0) * 100) + '%;height:100%;background:#639922;transition:width .2s"></div></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px">' + esc(o.status || '준비 중') + '</div></div>';
+        '<div class="card" style="margin-top:12px;text-align:center;padding:22px 16px"><div style="font-size:14px;font-weight:500">인식 중…</div><div style="height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;margin-top:12px"><div style="width:' + Math.round((o.prog || 0) * 100) + '%;height:100%;background:var(--green);transition:width .2s"></div></div><div style="font-size:11px;color:var(--text-muted);margin-top:8px">' + esc(o.status || '준비 중') + '</div></div>';
     } else { // done
       bodyInner =
         (o.img ? '<img src="' + o.img + '" style="width:100%;max-height:200px;object-fit:contain;border-radius:12px;border:0.5px solid var(--border);background:#000">' : '') +
@@ -4264,11 +4305,11 @@
     var selN = 0; Object.keys(sel).forEach(function (k) { if (sel[k]) selN++; });
     var grid = ps.length ? ('<div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">' + ps.map(function (p) {
       var on = !!sel[p.id];
-      return '<div style="position:relative;border-radius:10px;overflow:hidden;border:1.5px solid ' + (on ? '#639922' : 'var(--border)') + '"><img class="pThumb" data-id="' + p.id + '" src="' + (p.anno || p.orig) + '" style="width:100%;height:120px;object-fit:cover;display:block;cursor:pointer">' +
-        (p.anno ? '<span style="position:absolute;left:5px;top:5px;background:#27500A;color:#fff;font-size:9px;padding:1px 6px;border-radius:10px">주석</span>' : '') +
-        '<button class="btn pSel" data-id="' + p.id + '" style="position:absolute;left:5px;bottom:5px;width:26px;height:26px;border-radius:7px;padding:0;display:flex;align-items:center;justify-content:center;background:' + (on ? '#639922' : 'rgba(255,255,255,.9)') + '">' + ico('check', on ? '#fff' : 'var(--text-muted)', 14) + '</button>' +
+      return '<div style="position:relative;border-radius:10px;overflow:hidden;border:1.5px solid ' + (on ? 'var(--green)' : 'var(--border)') + '"><img class="pThumb" data-id="' + p.id + '" src="' + (p.anno || p.orig) + '" style="width:100%;height:120px;object-fit:cover;display:block;cursor:pointer">' +
+        (p.anno ? '<span style="position:absolute;left:5px;top:5px;background:var(--green-ink-fill);color:#fff;font-size:9px;padding:1px 6px;border-radius:10px">주석</span>' : '') +
+        '<button class="btn pSel" data-id="' + p.id + '" style="position:absolute;left:5px;bottom:5px;width:26px;height:26px;border-radius:7px;padding:0;display:flex;align-items:center;justify-content:center;background:' + (on ? 'var(--green)' : 'rgba(255,255,255,.9)') + '">' + ico('check', on ? 'var(--on-green)' : 'var(--text-muted)', 14) + '</button>' +
         '<button class="btn pSave" data-id="' + p.id + '" style="position:absolute;right:37px;top:5px;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0">' + ico('download', 'var(--text-primary)', 14) + '</button>' +
-        '<button class="btn pDel" data-id="' + p.id + '" style="position:absolute;right:5px;top:5px;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#C0392B;padding:0">' + ico('trash', '#C0392B', 14) + '</button>' +
+        '<button class="btn pDel" data-id="' + p.id + '" style="position:absolute;right:5px;top:5px;width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--danger);padding:0">' + ico('trash', 'var(--danger)', 14) + '</button>' +
         '<span style="position:absolute;right:5px;bottom:5px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:1px 6px;border-radius:9px">' + esc(p.traitName || '사진') + ' · 개체 ' + (p.indiv || 1) + '</span></div>';
     }).join('') + '</div>') : '<div style="text-align:center;color:var(--text-muted);padding:40px 10px">' + ico('photo', 'var(--border-strong)', 44) + '<div style="font-size:13px;margin-top:12px">이 계통의 사진이 없습니다</div></div>';
     v.innerHTML =
@@ -4276,7 +4317,7 @@
       '<div style="flex:1;padding:14px 14px;overflow:auto">' + grid + '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">사진을 탭하면 그리기(주석)로 편집됩니다. ' + ico('download', 'var(--text-muted)', 12) + ' 로 한 장씩, 아래 버튼으로 선택한 여러 장을 기기에 저장합니다.<br>파일명: 과제명_라벨번호_개체번호_형질_촬영일자.jpg</div></div>' +
       '<div style="padding:10px 14px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)">' +
         (selN ? '<button class="btn" id="phSaveSel" style="width:100%;height:46px;font-size:14px;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('download', 'var(--text-primary)', 17) + ' 선택한 ' + selN + '장 기기에 저장</button>' : '') +
-        '<div style="display:flex;gap:8px"><button class="btn primary" id="phShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', '#fff', 20) + ' 카메라 촬영</button>' +
+        '<div style="display:flex;gap:8px"><button class="btn primary" id="phShot" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('camera', 'var(--on-green)', 20) + ' 카메라 촬영</button>' +
         '<button class="btn" id="phPick" style="flex:1;height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('photo', 'var(--text-primary)', 20) + ' 앨범에서 선택</button></div>' +
         '<input type="file" id="phCam" accept="image/*" capture="environment" style="display:none">' +
         '<input type="file" id="phFile" accept="image/*" multiple style="display:none"></div>';
@@ -4313,7 +4354,7 @@
         '<div style="padding:10px 12px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           ['#D64545', '#E0A82E', '#2E7D5B', '#2f6fb0', '#111111', '#ffffff'].map(function (c) { return '<button class="btn drColor" data-c="' + c + '" style="width:30px;height:30px;border-radius:50%;padding:0;background:' + c + '"></button>'; }).join('') +
           '<div style="flex:1"></div><button class="btn drSize" data-s="3" style="width:38px;height:34px;padding:0;font-size:12px">가늘</button><button class="btn drSize" data-s="7" style="width:38px;height:34px;padding:0;font-size:12px">중</button><button class="btn drSize" data-s="14" style="width:38px;height:34px;padding:0;font-size:12px">굵</button></div>' +
-          '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="drErase" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('eraser', 'var(--text-primary)', 16) + ' 지우개</button><button class="btn" id="drUndo" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('arrow-back-up', 'var(--text-primary)', 16) + ' 되돌리기</button><button class="btn" id="drClear" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 16) + ' 전체지우기</button></div></div>';
+          '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="drErase" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('eraser', 'var(--text-primary)', 16) + ' 지우개</button><button class="btn" id="drUndo" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('arrow-back-up', 'var(--text-primary)', 16) + ' 되돌리기</button><button class="btn" id="drClear" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;color:var(--danger);border-color:var(--danger-br)">' + ico('circle-x', 'var(--danger)', 16) + ' 전체지우기</button></div></div>';
       setupDraw(p);
     });
   }
@@ -4354,11 +4395,11 @@
     var cur = getValFor(t.id), hasImg = typeof cur === 'string' && cur.indexOf('data:image') === 0;
     v.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:0.5px solid var(--border)"><button class="btn" id="wrBack" style="width:34px;height:34px;display:flex;align-items:center;justify-content:center">' + ico('arrow-left', 'var(--text-primary)', 18) + '</button><div style="flex:1"><div style="font-size:15px;font-weight:600">' + esc(t.name) + ' · 손글씨</div><div style="font-size:11px;color:var(--text-muted)">' + esc(l.label) + ' · 개체 ' + S.indiv + '</div></div><button class="btn primary" id="wrSave" style="height:38px;padding:0 16px;font-size:14px">저장</button></div>' +
-      '<div id="wrCanvasWrap" style="position:relative;flex:1;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden;min-height:260px"><canvas id="wrFg" style="position:absolute;touch-action:none;background:#fff"></canvas></div>' +
+      '<div id="wrCanvasWrap" style="position:relative;flex:1;display:flex;align-items:center;justify-content:center;background:var(--surface-2);overflow:hidden;min-height:260px"><canvas id="wrFg" style="position:absolute;touch-action:none;background:var(--surface-2)"></canvas></div>' +
       '<div style="padding:10px 12px 16px;border-top:0.5px solid var(--border);background:var(--surface-1)"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
         ['#111111', '#D64545', '#2f6fb0', '#2E7D5B'].map(function (c) { return '<button class="btn wrColor" data-c="' + c + '" style="width:30px;height:30px;border-radius:50%;padding:0;background:' + c + '"></button>'; }).join('') +
         '<div style="flex:1"></div><button class="btn wrSize" data-s="3" style="width:38px;height:34px;padding:0;font-size:12px">가늘</button><button class="btn wrSize" data-s="6" style="width:38px;height:34px;padding:0;font-size:12px">중</button><button class="btn wrSize" data-s="12" style="width:38px;height:34px;padding:0;font-size:12px">굵</button></div>' +
-        '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="wrErase" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('eraser', 'var(--text-primary)', 16) + ' 지우개</button><button class="btn" id="wrUndo" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('arrow-back-up', 'var(--text-primary)', 16) + ' 되돌리기</button><button class="btn" id="wrClear" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;color:#C0392B;border-color:#E3B4AE">' + ico('circle-x', '#C0392B', 16) + ' 전체지우기</button></div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="wrErase" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('eraser', 'var(--text-primary)', 16) + ' 지우개</button><button class="btn" id="wrUndo" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px">' + ico('arrow-back-up', 'var(--text-primary)', 16) + ' 되돌리기</button><button class="btn" id="wrClear" style="flex:1;height:42px;font-size:13px;display:flex;align-items:center;justify-content:center;gap:5px;color:var(--danger);border-color:var(--danger-br)">' + ico('circle-x', 'var(--danger)', 16) + ' 전체지우기</button></div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px">사용자가 쓰거나 그릴 수 있습니다.</div></div>';
     setupWrite(hasImg ? cur : null);
   }
@@ -4420,8 +4461,8 @@
       '<div style="flex:1;padding:16px 16px;overflow:auto">' +
       // 1) 웹 음성인식이 되는 환경(크롬 등)에서는 마이크 버튼 제공
       (supported ?
-        '<div style="text-align:center;padding:4px 0 8px"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:#C0392B;border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', '#fff', 34) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div>' + (nativeSR ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">앱 내장 음성인식 · 인터넷 없이도 동작(언어팩 설치 시)</div>' : '') + '</div>'
-        : '<div class="card" style="line-height:1.7;font-size:13px;color:var(--text-secondary)">' + ico('microphone', '#3B6D11', 15) + ' 이 앱에서는 웹 음성인식을 쓸 수 없어, <b>키보드의 마이크 버튼</b>으로 음성 입력합니다.<br><span style="color:var(--text-muted)">아래 칸을 누르면 키보드가 뜹니다 → 키보드의 <b>🎤 마이크</b>를 눌러 말하면 글자로 입력됩니다.</span></div>') +
+        '<div style="text-align:center;padding:4px 0 8px"><button class="btn ' + (vo.listening ? '' : 'primary') + '" id="voMic" style="width:80px;height:80px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center' + (vo.listening ? ';background:var(--danger-fill);border-color:#8f2b20;color:#fff' : '') + '">' + ico(vo.listening ? 'player-stop' : 'microphone', 'var(--on-green)', 34) + '</button><div style="font-size:12px;color:var(--text-secondary);margin-top:8px">' + (vo.listening ? '듣는 중… 다시 누르면 정지' : '마이크를 눌러 말하세요') + '</div>' + (nativeSR ? '<div style="font-size:11px;color:var(--text-muted);margin-top:3px">앱 내장 음성인식 · 인터넷 없이도 동작(언어팩 설치 시)</div>' : '') + '</div>'
+        : '<div class="card" style="line-height:1.7;font-size:13px;color:var(--text-secondary)">' + ico('microphone', 'var(--green-d)', 15) + ' 이 앱에서는 웹 음성인식을 쓸 수 없어, <b>키보드의 마이크 버튼</b>으로 음성 입력합니다.<br><span style="color:var(--text-muted)">아래 칸을 누르면 키보드가 뜹니다 → 키보드의 <b>🎤 마이크</b>를 눌러 말하면 글자로 입력됩니다.</span></div>') +
       // 2) 키보드 마이크/직접 입력 칸 — 모든 환경 공통, 말한 내용이 그대로 파싱됨
       '<div style="font-size:12px;font-weight:600;margin:14px 0 6px">' + (supported ? '또는 키보드 마이크로 입력' : '음성·직접 입력') + '</div>' +
       '<textarea class="ein" id="voManual" style="height:84px;padding:10px 12px;resize:none;font-size:15px;line-height:1.5" placeholder="예: 병징 5 발병면적률 30 마디수 12">' + esc(vo.transcript || '') + '</textarea>' +
@@ -4590,11 +4631,11 @@
       var on = !!K.sel[i];
       return '<div class="pkCell" data-i="' + i + '" style="position:relative;border-radius:9px;overflow:hidden;border:2.5px solid ' + (on ? 'var(--green)' : 'transparent') + ';cursor:pointer;background:var(--surface-1)">' +
         '<img src="' + im.url + '" style="width:100%;aspect-ratio:1;object-fit:cover;display:block">' +
-        '<div style="position:absolute;left:5px;top:5px;width:20px;height:20px;border-radius:5px;background:' + (on ? 'var(--green)' : 'rgba(255,255,255,.85)') + ';border:1px solid ' + (on ? 'var(--green-d)' : 'var(--border-strong)') + ';display:flex;align-items:center;justify-content:center">' + (on ? ico('check', '#fff', 13) : '') + '</div>' +
+        '<div style="position:absolute;left:5px;top:5px;width:20px;height:20px;border-radius:5px;background:' + (on ? 'var(--green)' : 'rgba(255,255,255,.85)') + ';border:1px solid ' + (on ? 'var(--green-d)' : 'var(--border-strong)') + ';display:flex;align-items:center;justify-content:center">' + (on ? ico('check', 'var(--on-green)', 13) : '') + '</div>' +
         '</div>';
     }).join('');
     var o = openOverlay(
-      '<div class="ovl-title">' + ico('photo', '#3B6D11', 18) + ' 사진 고르기 <span style="font-size:12px;font-weight:400;color:var(--text-muted)">' + nSel + '/' + K.imgs.length + '</span></div>' +
+      '<div class="ovl-title">' + ico('photo', 'var(--green-d)', 18) + ' 사진 고르기 <span style="font-size:12px;font-weight:400;color:var(--text-muted)">' + nSel + '/' + K.imgs.length + '</span></div>' +
       '<div style="margin-top:10px;max-height:46vh;overflow:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px">' + cells + '</div>' +
       '<div class="ovl-btns"><button class="btn" id="pkAll" style="flex:0 0 92px">' + (nSel === K.imgs.length ? '모두 해제' : '전체선택') + '</button>' +
       '<button class="btn" id="pkCancel">취소</button>' +
@@ -4631,14 +4672,14 @@
     if (all.length <= 1) { toast('과제가 하나뿐입니다'); return; }
     var rows = all.map(function (p) {
       var f = folderOf(p.id), on = (p.id === cur);
-      return '<button class="btn ppRow" data-p="' + esc(p.id) + '" style="width:100%;text-align:left;padding:11px 12px;margin-top:7px;background:var(--surface-2);display:flex;align-items:center;gap:9px' + (on ? ';border-color:#639922;background:#EAF3DE' : '') + '">' +
-        '<div style="width:4px;height:30px;border-radius:2px;background:' + (p.color || '#639922') + ';flex:0 0 auto"></div>' +
-        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600' + (on ? ';color:#27500A' : '') + '">' + esc(p.name) + '</div>' +
+      return '<button class="btn ppRow" data-p="' + esc(p.id) + '" style="width:100%;text-align:left;padding:11px 12px;margin-top:7px;background:var(--surface-2);display:flex;align-items:center;gap:9px' + (on ? ';border-color:var(--green);background:var(--green-t)' : '') + '">' +
+        '<div style="width:4px;height:30px;border-radius:2px;background:' + (p.color || 'var(--green)') + ';flex:0 0 auto"></div>' +
+        '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600' + (on ? ';color:var(--green-ink)' : '') + '">' + esc(p.name) + '</div>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:1px">' + (f ? esc(f.name) + ' · ' : '') + '세대 ' + p.items.length + ' · 라벨번호 ' + p.lines + '</div></div>' +
-        (on ? ico('check', '#3B6D11', 17) : '') + '</button>';
+        (on ? ico('check', 'var(--green-d)', 17) : '') + '</button>';
     }).join('');
     var o = openOverlay(
-      '<div class="ovl-title">' + ico('clipboard-list', '#3B6D11', 18) + ' 과제 고르기</div>' +
+      '<div class="ovl-title">' + ico('clipboard-list', 'var(--green-d)', 18) + ' 과제 고르기</div>' +
       '<div style="max-height:52vh;overflow:auto;margin-top:4px">' + rows + '</div>' +
       '<div class="ovl-btns"><button class="btn" id="ppCancel">취소</button></div>'
     );
@@ -4664,16 +4705,16 @@
     var nProj = projects().length;
     function btn(id, icon, text, primary) {
       return '<button class="btn' + (primary ? ' primary' : '') + '" id="' + id + '" style="width:100%;height:52px;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:9px">' +
-        ico(icon, primary ? '#fff' : 'var(--text-primary)', 19) + ' ' + text + '</button>';
+        ico(icon, primary ? 'var(--on-green)' : 'var(--text-primary)', 19) + ' ' + text + '</button>';
     }
     v.innerHTML =
       '<div style="padding:16px 16px 12px;border-bottom:0.5px solid var(--border)"><div style="font-size:18px;font-weight:700">내보내기</div></div>' +
       '<div style="padding:14px 16px 24px">' +
         '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">' +
-          '<span style="font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">' + ico('clipboard-list', '#639922', 16) + ' 선택 과제 내보내기</span>' +
-          '<button class="btn" id="ePickProj" style="flex:1;min-width:0;height:32px;padding:0 10px;font-size:12px;display:flex;align-items:center;gap:5px;background:#EAF3DE;border-color:#CFE0BA;color:#27500A;font-weight:600">' +
+          '<span style="font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;flex:0 0 auto">' + ico('clipboard-list', 'var(--green)', 16) + ' 선택 과제 내보내기</span>' +
+          '<button class="btn" id="ePickProj" style="flex:1;min-width:0;height:32px;padding:0 10px;font-size:12px;display:flex;align-items:center;gap:5px;background:var(--green-t);border-color:var(--green-tbr);color:var(--green-ink);font-weight:600">' +
             '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left">' + (fold ? esc(fold.name) + ' · ' : '') + esc(g.projName) + '</span>' +
-            ico('chevron-down', '#3B6D11', 15) + '</button>' +
+            ico('chevron-down', 'var(--green-d)', 15) + '</button>' +
         '</div>' +
         btn('eProjAll', 'file-zip', '선택 과제 파일 (CSV, Excel, 사진) 다운로드', true) +
         btn('eCsv', 'file-type-csv', '선택 과제 CSV (통계 분석용) 다운로드') +
@@ -4681,7 +4722,7 @@
         btn('eZip', 'photo', '선택 과제 사진 ZIP 다운로드') +
         btn('ePick', 'checks', '사진 개별 선택 다운로드') +
         '<div style="height:22px"></div>' +
-        '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">' + ico('layout-grid', '#639922', 16) + ' 전체 과제 내보내기 <span style="font-weight:400;color:var(--text-muted);font-size:11px">과제 ' + nProj + '개</span></div>' +
+        '<div style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">' + ico('layout-grid', 'var(--green)', 16) + ' 전체 과제 내보내기 <span style="font-weight:400;color:var(--text-muted);font-size:11px">과제 ' + nProj + '개</span></div>' +
         btn('eAllZip', 'file-zip', '전체 과제 파일 ZIP 다운로드', true) +
         btn('eAllCsv', 'file-type-csv', '전체 과제 CSV (통계 분석용) 다운로드') +
         btn('eAllXlsx', 'file-spreadsheet', '전체 과제 Excel (사용자 조사용) ZIP 다운로드') +
@@ -4842,7 +4883,7 @@
   function renderSettings() {
     var v = $('view-settings'), st = S.settings, prov = st.provider || 'gas';
     function sect(icon, title, sub) {
-      return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><div style="width:26px;height:26px;border-radius:8px;background:var(--green-t);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico(icon, '#3B6D11', 15) + '</div>' +
+      return '<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px"><div style="width:26px;height:26px;border-radius:8px;background:var(--green-t);display:flex;align-items:center;justify-content:center;flex:0 0 auto">' + ico(icon, 'var(--green-d)', 15) + '</div>' +
         '<div style="font-size:15px;font-weight:700">' + title + '</div></div>' +
         (sub ? '<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">' + sub + '</div>' : '<div style="height:8px"></div>');
     }
@@ -4851,8 +4892,8 @@
       return '<div style="display:flex;gap:8px;margin-top:9px">' +
         ['low', 'orig'].map(function (k) {
           var on = (cur === k), o = PHOTO_Q[k];
-          return '<button class="btn ' + cls + '" data-q="' + k + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px;background:var(--surface-2)' + (on ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">' + o.name +
-            '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? '#3B6D11' : 'var(--text-muted)') + '">' + (note && note[k] ? note[k] : o.sub) + '</span></button>';
+          return '<button class="btn ' + cls + '" data-q="' + k + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px;background:var(--surface-2)' + (on ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + o.name +
+            '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? 'var(--green-d)' : 'var(--text-muted)') + '">' + (note && note[k] ? note[k] : o.sub) + '</span></button>';
         }).join('') + '</div>';
     }
 
@@ -4876,8 +4917,8 @@
         '<div style="height:1px;background:var(--border);margin:12px 0"></div>' +
         '<div style="font-size:12px;color:var(--text-secondary);font-weight:500;margin-bottom:6px">저장 위치</div>' +
         '<div style="display:flex;gap:8px">' +
-          '<button class="btn sProv" data-v="gas" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'gas' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">구글 드라이브</button>' +
-          '<button class="btn sProv" data-v="od" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'od' ? ';background:#EAF3DE;border-color:#639922;color:#27500A;font-weight:600' : '') + '">OneDrive</button>' +
+          '<button class="btn sProv" data-v="gas" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'gas' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">구글 드라이브</button>' +
+          '<button class="btn sProv" data-v="od" style="flex:1;height:42px;font-size:13px;background:var(--surface-2)' + (prov === 'od' ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">OneDrive</button>' +
         '</div>' +
         (prov === 'gas' ?
           ('<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">동기화 URL <span style="color:var(--text-muted);font-weight:400">(Apps Script 웹앱 /exec)</span></label>' +
@@ -4888,7 +4929,7 @@
            '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">공유 토큰 <span style="color:var(--text-muted);font-weight:400">(선택)</span></label>' +
            '<input class="ein" id="sTok" style="margin-top:6px" placeholder="(선택)" value="' + esc(st.token) + '">' +
            '<div style="display:flex;gap:8px;margin-top:10px">' +
-             '<button class="btn primary" id="sOdLogin" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('cloud-upload', '#fff', 17) + ' OneDrive 연결</button>' +
+             '<button class="btn primary" id="sOdLogin" style="flex:1;height:46px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px">' + ico('cloud-upload', 'var(--on-green)', 17) + ' OneDrive 연결</button>' +
              '<button class="btn" id="sOdOut" style="flex:0 0 96px;height:46px;font-size:13px;background:var(--surface-2)">연결 해제</button>' +
            '</div>' +
            '<div id="sOdStat" style="font-size:11px;color:var(--text-muted);margin-top:8px">연결 상태 확인 중…</div>' +
@@ -4905,7 +4946,7 @@
         '<div style="font-size:11px;color:var(--text-muted);margin-top:10px">미동기화 <b data-pending>' + S.pending + '</b>건 · 마지막 동기화 ' + (S.lastSync ? tm(S.lastSync) : '없음') + ' · 기기 ID ' + esc(st.deviceId) + '</div>'
       ) +
       card(
-        '<div id="sHelpHead" style="display:flex;align-items:center;gap:6px;cursor:pointer">' + ico('info-circle', '#639922', 14) +
+        '<div id="sHelpHead" style="display:flex;align-items:center;gap:6px;cursor:pointer">' + ico('info-circle', 'var(--green)', 14) +
           '<span style="font-size:13px;font-weight:600;flex:1">동기화 방법</span>' +
           ico(S.setHelpOpen ? 'chevron-down' : 'chevron-right', 'var(--text-muted)', 16) + '</div>' +
         (!S.setHelpOpen ? '' : '<div style="margin-top:10px">' +
@@ -4927,7 +4968,7 @@
           '<b>3.</b> 리디렉션 URI에서 플랫폼을 <b>단일 페이지 애플리케이션(SPA)</b>으로 고르고, 위에 표시된 <b>리디렉션 주소</b>를 그대로 붙여넣습니다.<br>' +
           '<b>4.</b> 등록 후 <b>API 사용 권한 → Microsoft Graph → 위임된 권한</b>에서 <b>Files.ReadWrite</b>, <b>offline_access</b>를 추가합니다.<br>' +
           '<b>5.</b> 개요 화면의 <b>애플리케이션(클라이언트) ID</b>를 복사해 위 칸에 붙여넣고 <b>OneDrive 연결</b>을 누릅니다.' +
-          '<br><br><span style="color:#8A5A12">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다.</span>' +
+          '<br><br><span style="color:var(--amber-ink)">앱 등록은 팀에서 <b>한 번만</b> 하면 되고, 팀원은 각자 로그인해 자기 OneDrive에 저장합니다.</span>' +
         '</div>')) + '</div>') ) +
 
       /* ===== 2. 기기 설정 ===== */
@@ -4940,6 +4981,16 @@
         '<div style="font-size:11px;color:var(--text-muted);margin-top:8px" id="sStore">기기 저장 사용량 확인 중…</div>'
       ) +
       card(
+        '<div style="font-size:13px;font-weight:600">화면 색</div>' +
+        '<div style="font-size:11px;color:var(--text-muted);margin-top:2px">어두운 곳에서 눈이 덜 부시게 합니다</div>' +
+        '<div style="display:flex;gap:8px;margin-top:9px">' +
+        [['auto', '자동', '휴대폰 설정을 따름'], ['light', '밝게', '늘 밝은 화면'], ['dark', '어둡게', '늘 어두운 화면']].map(function (o) {
+          var on = (themeMode() === o[0]);
+          return '<button class="btn sTheme" data-t="' + o[0] + '" style="flex:1;height:58px;font-size:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0 4px;background:var(--surface-2)' + (on ? ';background:var(--green-t);border-color:var(--green);color:var(--green-ink);font-weight:600' : '') + '">' + o[1] +
+            '<span style="font-size:10px;font-weight:400;line-height:1.3;color:' + (on ? 'var(--green-d)' : 'var(--text-muted)') + '">' + o[2] + '</span></button>';
+        }).join('') + '</div>'
+      ) +
+      card(
         '<div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><div style="font-size:13px;font-weight:600">진동 피드백</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">버튼·스와이프 시 짧게 진동 (안드로이드)</div></div><div class="sw' + (st.haptic !== false ? ' on' : '') + '" id="sHaptic"><div class="knob"></div></div></div>'
       ) +
       card(
@@ -4949,7 +5000,7 @@
 
       /* ===== 3. 초기화 ===== */
       '<div style="height:8px"></div>' +
-      '<button class="btn" id="sReset" style="width:100%;height:46px;font-size:13.5px;color:#C0392B;border-color:#E3B4AE">모든 로컬 데이터 삭제 (초기화)</button>' +
+      '<button class="btn" id="sReset" style="width:100%;height:46px;font-size:13.5px;color:var(--danger);border-color:var(--danger-br)">모든 로컬 데이터 삭제 (초기화)</button>' +
 
       /* ===== 4. 사용자 기록 (맨 아래) ===== */
       '<div style="height:20px"></div>' +
@@ -4958,7 +5009,7 @@
         '<div style="font-size:12px;color:var(--text-secondary);line-height:1.7">' +
           (S.user && S.user.email
             ? '<b style="font-size:13px;color:var(--text-primary)">' + esc(S.user.name || '') + '</b><br>' + esc(S.user.email) +
-              '<br><span style="font-size:11px;color:' + ((S.user.status === 'BLOCKED') ? '#C0392B' : '#3B6D11') + '">' + ((S.user.status === 'BLOCKED') ? '차단됨 · 관리자에게 문의하세요' : '승인됨 (ACTIVE)') + '</span>' +
+              '<br><span style="font-size:11px;color:' + ((S.user.status === 'BLOCKED') ? 'var(--danger)' : 'var(--green-d)') + '">' + ((S.user.status === 'BLOCKED') ? '차단됨 · 관리자에게 문의하세요' : '승인됨 (ACTIVE)') + '</span>' +
               (S.user.at ? '<span style="font-size:11px;color:var(--text-muted)"> · 확인 ' + bkWhen(S.user.at) + '</span>' : '')
             : '<span style="color:var(--text-muted)">아직 등록하지 않았습니다</span>') + '</div>' +
         '<div style="display:flex;gap:8px;margin-top:10px">' +
@@ -4976,9 +5027,9 @@
     if ($('sOdStat')) {
       odEnsureToken(true).then(function (tk) {
         var el = $('sOdStat'); if (!el) return;
-        if (!tk) { el.innerHTML = '<span style="color:#B0721A">연결 안 됨 · 클라이언트 ID 입력 후 연결하세요</span>'; return; }
-        el.innerHTML = '<span style="color:#3B6D11">연결됨 ✓</span>';
-        odWhoAmI(tk).then(function (who) { if (who && $('sOdStat')) $('sOdStat').innerHTML = '<span style="color:#3B6D11">연결됨 ✓ ' + esc(who) + '</span>'; });
+        if (!tk) { el.innerHTML = '<span style="color:var(--amber)">연결 안 됨 · 클라이언트 ID 입력 후 연결하세요</span>'; return; }
+        el.innerHTML = '<span style="color:var(--green-d)">연결됨 ✓</span>';
+        odWhoAmI(tk).then(function (who) { if (who && $('sOdStat')) $('sOdStat').innerHTML = '<span style="color:var(--green-d)">연결됨 ✓ ' + esc(who) + '</span>'; });
       });
     }
     $('sSave').onclick = function () { if ($('sUrl')) st.syncUrl = $('sUrl').value.trim(); if ($('sTok')) st.token = $('sTok').value.trim(); if ($('sOdCid')) st.odClientId = $('sOdCid').value.trim(); kvSet('settings', st).then(function () { toast('저장됨'); if (navigator.onLine && st.syncOn !== false && st.syncUrl) trySync(true); }); };
@@ -5004,6 +5055,9 @@
           (quota ? ' / 사용 가능 ' + (quota > 1024 ? (quota / 1024).toFixed(1) + 'GB' : quota.toFixed(0) + 'MB') : '');
       }).catch(function () {});
     }
+    [].forEach.call(document.querySelectorAll('.sTheme'), function (b) {
+      b.onclick = function () { applyTheme(b.getAttribute('data-t')); renderSettings(); };
+    });
     $('sHaptic').onclick = function () { st.haptic = (st.haptic === false); this.classList.toggle('on', st.haptic !== false); kvSet('settings', st); if (st.haptic !== false) haptic(25); };
     if ($('sGuide')) $('sGuide').onclick = function () { openGuide(); };
     if ($('sUser')) $('sUser').onclick = function () { go('signup'); };
@@ -5219,18 +5273,18 @@
     var o = document.getElementById('guideOvl'); if (!o) return;
     var s = G.slides[G.i], n = G.slides.length;
     var mid = s.last
-      ? '<div class="gend"><div class="gendic">' + ico('circle-check', '#fff', 40) + '</div>' +
+      ? '<div class="gend"><div class="gendic">' + ico('circle-check', 'var(--on-green)', 40) + '</div>' +
         '<div class="gendttl">준비 완료</div>' +
         '<div class="gendmsg">언제든 <b>설정 → 사용 가이드 다시 보기</b>에서<br>이 안내를 다시 볼 수 있습니다.</div></div>'
       : '<div class="gshot"><div class="gframe' + (s.doc ? ' gdoc' : '') + '" id="gShot"><img src="guide/' + s.img + '.jpg" alt="" draggable="false">' +
         (s.calls || []).map(guideCallHTML).join('') +
         (s.swipe ? '<div class="gswh">◀ 개체 ▶</div><div class="gswv">▲ 라벨번호 ▼</div>' : '') +
-        '<div class="gzhint">' + ico('search', '#fff', 12) + ' 탭하면 크게</div>' +
+        '<div class="gzhint">' + ico('search', 'var(--on-green)', 12) + ' 탭하면 크게</div>' +
         '</div></div>';
     var dots = G.slides.map(function (x, k) { return '<div class="gdot' + (k === G.i ? ' on' : '') + '" data-k="' + k + '"></div>'; }).join('');
     var foot = s.last
       ? '<div class="gfoot">' +
-          '<div class="gchk' + (G.hide ? ' on' : '') + '" id="gChk"><div class="gbox">' + (G.hide ? ico('check', '#fff', 12) : '') + '</div>다음부터 이 안내를 보지 않기</div>' +
+          '<div class="gchk' + (G.hide ? ' on' : '') + '" id="gChk"><div class="gbox">' + (G.hide ? ico('check', 'var(--on-green)', 12) : '') + '</div>다음부터 이 안내를 보지 않기</div>' +
           '<div class="gbtns"><button class="btn gghost" id="gPrev">이전</button><button class="btn primary" id="gDone">시작하기</button></div>' +
         '</div>'
       : '<div class="gfoot"><div class="gdots">' + dots + '</div><div class="gbtns">' +
@@ -5243,7 +5297,7 @@
         '<button class="gx" id="gClose">' + ico('x', 'var(--text-secondary)', 16) + '</button></div>' +
       mid +
       '<div class="gtxt"><div class="gtitle">' + esc(s.title) + '</div><div class="gbody">' + s.body + '</div>' +
-        (s.note ? '<div class="gnote">' + ico('info-circle', '#3B6D11', 13) + '<span>' + esc(s.note) + '</span></div>' : '') + '</div>' +
+        (s.note ? '<div class="gnote">' + ico('info-circle', 'var(--green-d)', 13) + '<span>' + esc(s.note) + '</span></div>' : '') + '</div>' +
       foot + '</div>';
 
     if ($('gNext')) $('gNext').onclick = function () { guideGo(1); };
@@ -5309,7 +5363,7 @@
         '<button class="gzbtn" id="gzOut">－</button>' +
         '<span class="gzpct" id="gzPct">100%</span>' +
         '<button class="gzbtn" id="gzIn">＋</button>' +
-        '<button class="gzbtn" id="gzClose">' + ico('x', '#fff', 17) + '</button>' +
+        '<button class="gzbtn" id="gzClose">' + ico('x', 'var(--on-green)', 17) + '</button>' +
       '</div>' +
       '<div class="gzbody" id="gzBody"><img id="gzImg" src="' + src + '" alt=""></div>';
     document.body.appendChild(z);
@@ -5657,7 +5711,7 @@
   function cropCandidates() {
     var out = WIZ_CROPS.map(function (c) { return { name: c.name, color: c.color }; });
     S.gens.forEach(function (g) {
-      if (g.crop && g.crop !== '미분류' && !out.some(function (o) { return o.name === g.crop; })) out.push({ name: g.crop, color: g.color || '#639922' });
+      if (g.crop && g.crop !== '미분류' && !out.some(function (o) { return o.name === g.crop; })) out.push({ name: g.crop, color: g.color || 'var(--green)' });
     });
     return out.sort(function (a, b) { return b.name.length - a.name.length; });   // 긴 이름부터 (얼갈이배추 > 배추)
   }
@@ -5708,7 +5762,7 @@
       await bkYield();
       var projName = uniqName(s.proj), projId = 'P' + base + '_' + pi;
       var gc = guessCrop(s.proj) || guessCrop(s.group);            // 과제명 → 없으면 모음 폴더명에서
-      var cropName = gc ? gc.name : '미분류', cropColor = gc ? gc.color : '#8C9583';
+      var cropName = gc ? gc.name : '미분류', cropColor = gc ? gc.color : 'var(--text-muted)';
 
       // 1) 형질 — 야장 CSV의 형질명·단위에서
       var traitOrder = [], traitVals = {}, traitUnit = {}, traitDates = {}, traitKind = {};
@@ -5888,11 +5942,11 @@
   function importPopup() {
     var canDir = fsaSupported();
     openOverlay(
-      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 과제 불러오기</div>' +
+      '<div class="ovl-title">' + ico('database-import', 'var(--green-d)', 18) + ' 과제 불러오기</div>' +
       '<div class="ovl-msg">기기에 저장해 둔 백업에서 과제를 되살립니다.<br>' +
         '<b>백업 ZIP · 과제 폴더 · 모음 폴더 · 야장/라벨목록 CSV · Excel 야장</b> 중 하나를 고르세요.</div>' +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">' +
-        '<button class="btn primary" id="imFile" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-upload', '#fff', 18) + ' 파일 선택 (ZIP · CSV · Excel)</button>' +
+        '<button class="btn primary" id="imFile" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('file-upload', 'var(--on-green)', 18) + ' 파일 선택 (ZIP · CSV · Excel)</button>' +
         (canDir ? '<button class="btn" id="imDir" style="height:50px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('folder', 'var(--text-primary)', 18) + ' 폴더 선택 (과제 · 모음 폴더)</button>' : '') +
       '</div>' +
       '<input type="file" id="imInput" accept=".zip,.csv,.xlsx,.jpg,.jpeg,.png" multiple style="display:none">' +
@@ -5915,7 +5969,7 @@
 
   function importProgress(msg) {
     var o = openOverlay(
-      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 과제 불러오기</div>' +
+      '<div class="ovl-title">' + ico('database-import', 'var(--green-d)', 18) + ' 과제 불러오기</div>' +
       '<div class="ovl-msg" id="bkMsg" style="white-space:pre-line;min-height:38px">' + esc(msg) + '</div>' +
       '<div style="height:8px;border-radius:6px;background:var(--surface-1);overflow:hidden;margin-top:12px"><div id="bkBar" style="height:100%;width:4%;background:var(--green);transition:width .25s"></div></div>'
     );
@@ -5936,12 +5990,12 @@
     if (!plan.length) { closeOverlay(); toast('과제로 읽을 수 있는 자료가 없습니다 · CSV가 들어 있는지 확인하세요'); return; }
     closeOverlay();
     var rows = plan.slice(0, 6).map(function (s) {
-      return '<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:6px">' + ico(s.group ? 'folder' : 'clipboard-list', '#639922', 13) +
+      return '<div style="display:flex;gap:6px;align-items:flex-start;font-size:12px;margin-top:6px">' + ico(s.group ? 'folder' : 'clipboard-list', 'var(--green)', 13) +
         '<div style="flex:1;min-width:0"><div style="font-weight:600;word-break:break-all">' + (s.group ? esc(s.group) + ' / ' : '') + esc(s.proj) + '</div>' +
         '<div style="color:var(--text-muted);font-size:11px">' + esc(s.crop || '미분류') + ' · 라벨 ' + s.nLabels + ' · 조사값 ' + s.nObs + ' · 사진 ' + s.nPhotos + '</div></div></div>';
     }).join('') + (plan.length > 6 ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">… 외 ' + (plan.length - 6) + '개</div>' : '');
     openOverlay(
-      '<div class="ovl-title">' + ico('database-import', '#3B6D11', 18) + ' 불러올 과제 ' + plan.length + '개</div>' +
+      '<div class="ovl-title">' + ico('database-import', 'var(--green-d)', 18) + ' 불러올 과제 ' + plan.length + '개</div>' +
       '<div style="margin-top:8px;padding:10px 11px;border-radius:10px;background:var(--surface-1);max-height:190px;overflow:auto">' + rows + '</div>' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.6">새 과제로 추가됩니다. 형질은 CSV의 <b>형질 수집형태</b> 열을 그대로 따르고, 그 열이 없는 파일(엑셀 포함)은 값과 단위에서 추정합니다. 등급 척도·항목 목록은 실제로 쓰인 값에서 되살리니 불러온 뒤 <b>과제 수정 → 형질 편집</b>에서 확인해 주세요.</div>' +
       '<div class="ovl-btns"><button class="btn" id="ipCancel">취소</button><button class="btn primary" id="ipOk">불러오기</button></div>'
@@ -5984,15 +6038,15 @@
     var v = $('view-signup'), u = S.user || {};
     v.innerHTML =
       '<div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:26px 22px">' +
-        '<div style="width:56px;height:56px;border-radius:16px;background:#639922;display:flex;align-items:center;justify-content:center;margin-bottom:16px">' + ico('plant-2', '#fff', 30) + '</div>' +
+        '<div style="width:56px;height:56px;border-radius:16px;background:var(--green);display:flex;align-items:center;justify-content:center;margin-bottom:16px">' + ico('plant-2', 'var(--on-green)', 30) + '</div>' +
         '<div style="font-size:21px;font-weight:700">사용자 등록</div>' +
         '<div style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin-top:8px">이메일과 사용자명을 입력하면 바로 시작합니다.<br>등록 정보는 앱 개선 및 관리 목적으로 사용됩니다.<br>최초 한번 등록시 추가 등록 없이 홈 화면으로 실행됩니다.</div>' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:22px">이메일</label>' +
         '<input class="ein" id="suEmail" type="email" inputmode="email" autocomplete="email" style="margin-top:6px" placeholder="name@company.com" value="' + esc(u.email || '') + '">' +
         '<label style="font-size:12px;color:var(--text-secondary);font-weight:500;display:block;margin-top:14px">사용자명</label>' +
         '<input class="ein" id="suName" autocomplete="name" style="margin-top:6px" placeholder="예) 홍길동" value="' + esc(u.name || '') + '">' +
-        '<div id="suMsg" style="font-size:12px;color:#B0721A;margin-top:10px;min-height:18px"></div>' +
-        '<button class="btn primary" id="suOk" style="width:100%;height:52px;font-size:15px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('check', '#fff', 19) + ' 등록하고 시작하기</button>' +
+        '<div id="suMsg" style="font-size:12px;color:var(--amber);margin-top:10px;min-height:18px"></div>' +
+        '<button class="btn primary" id="suOk" style="width:100%;height:52px;font-size:15px;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('check', 'var(--on-green)', 19) + ' 등록하고 시작하기</button>' +
         '<div style="font-size:11px;color:var(--text-muted);margin-top:14px;line-height:1.6">인터넷이 없어도 등록됩니다. 연결되면 자동으로 서버에 반영됩니다.</div>' +
       '</div>';
     var em = $('suEmail'), nm = $('suName');
@@ -6024,7 +6078,7 @@
     o.id = 'blockOvl'; o.className = 'blockovl';
     o.innerHTML =
       '<div class="blockbox">' +
-        '<div class="blockic">' + ico('lock', '#fff', 34) + '</div>' +
+        '<div class="blockic">' + ico('lock', 'var(--on-green)', 34) + '</div>' +
         '<div class="blocktitle">사용이 제한되었습니다</div>' +
         '<div class="blockmsg">이 계정은 현재 <b>차단</b> 상태입니다.<br>연구소 <b>관리자에게 문의 바랍니다.</b></div>' +
         '<button class="btn" id="blkRetry" style="width:100%;height:46px;font-size:14px;margin-top:16px">다시 확인</button>' +
@@ -6117,18 +6171,18 @@
     if (document.getElementById('ovl')) return;
     var n = S.bkPending || 0, ever = !!S.lastBackup;
     var msg = n
-      ? '마지막 백업 이후 저장한 조사값이 <b style="color:#B0721A">' + n + '건</b> 있습니다.<br>닫기 전에 <b>기기 백업</b>을 해두시면 안전합니다.'
+      ? '마지막 백업 이후 저장한 조사값이 <b style="color:var(--amber)">' + n + '건</b> 있습니다.<br>닫기 전에 <b>기기 백업</b>을 해두시면 안전합니다.'
       : (ever ? '마지막 백업 ' + bkWhen(S.lastBackup) + ' 이후 새로 저장된 자료가 없습니다.<br>그대로 닫아도 괜찮습니다.'
               : '아직 기기 백업을 한 적이 없습니다.<br>닫기 전에 <b>기기 백업</b>을 해두시면 안전합니다.');
     openOverlay(
-      '<div class="ovl-title">' + ico('device-floppy', '#3B6D11', 18) + ' 앱을 닫을까요?</div>' +
+      '<div class="ovl-title">' + ico('device-floppy', 'var(--green-d)', 18) + ' 앱을 닫을까요?</div>' +
       '<div class="ovl-msg" style="line-height:1.7">' + msg + '</div>' +
       '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">' +
-        '<button class="btn' + (n ? ' primary' : '') + '" id="xbBackup" style="height:48px;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('device-floppy', n ? '#fff' : 'var(--text-primary)', 18) + ' 지금 기기 백업</button>' +
+        '<button class="btn' + (n ? ' primary' : '') + '" id="xbBackup" style="height:48px;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:7px">' + ico('device-floppy', n ? 'var(--on-green)' : 'var(--text-primary)', 18) + ' 지금 기기 백업</button>' +
       '</div>' +
       '<div style="font-size:11px;color:var(--text-muted);margin-top:9px;line-height:1.6">백업은 다운로드 폴더의 <b>CropMemo</b> 폴더에 저장됩니다. 기기에 저장된 자료는 앱을 닫아도 지워지지 않습니다.</div>' +
       '<div class="ovl-btns"><button class="btn" id="xbStay">계속 쓰기</button>' +
-        '<button class="btn' + (n ? '' : ' primary') + '" id="xbClose"' + (n ? ' style="color:#C0392B;border-color:#E3B4AE"' : '') + '>' + (n ? '그냥 닫기' : '닫기') + '</button></div>'
+        '<button class="btn' + (n ? '' : ' primary') + '" id="xbClose"' + (n ? ' style="color:var(--danger);border-color:var(--danger-br)"' : '') + '>' + (n ? '그냥 닫기' : '닫기') + '</button></div>'
     );
     $('xbStay').onclick = closeOverlay;
     $('xbBackup').onclick = function () { closeOverlay(); startBackup(); };
@@ -6165,7 +6219,7 @@
       var mig = false;
       gens.forEach(function (g) {
         if (!g.projId) { g.projId = 'P_' + (g.projName || '무제'); mig = true; }
-        if (g.crop === '불러옴' || g.crop === '불러오기') { g.crop = '미분류'; g.color = '#8C9583'; mig = true; }
+        if (g.crop === '불러옴' || g.crop === '불러오기') { g.crop = '미분류'; g.color = 'var(--text-muted)'; mig = true; }
         // 기존 프로젝트의 숫자 등급 척도에 '판독불가' 자동 보강(이미 있으면 유지)
         (g.traits || []).forEach(function (t) {
           if (t.type === 'rating') { var before = (t.scale || []).length; t.scale = withUnreadable(t.scale); if (t.scale.length !== before) mig = true; }
@@ -6214,10 +6268,10 @@
     v.classList.add('on');
     var msg = (err && (err.stack || err.message)) || String(err);
     msg = String(msg).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    v.innerHTML = '<div style="padding:22px 18px"><div style="font-size:16px;font-weight:700;margin-bottom:10px">앱을 시작하지 못했어요</div><div style="font-size:12px;color:#8a5a12;background:#FAEEDA;border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto">' + msg + '</div>' +
-      '<button id="beReload" style="width:100%;height:48px;margin-top:14px;border:0.5px solid #C9CFC3;border-radius:10px;background:#fff;font-size:15px">새로고침</button>' +
-      '<button id="beReset" style="width:100%;height:48px;margin-top:10px;border:0.5px solid #E3B4AE;border-radius:10px;background:#fff;color:#C0392B;font-size:14px">데이터 초기화 후 재시작</button>' +
-      '<div style="font-size:11px;color:#8C9583;margin-top:10px;line-height:1.5">먼저 새로고침을 눌러보고, 그래도 안 되면 초기화하세요. 초기화는 이 기기의 로컬 데이터만 지웁니다.</div></div>';
+    v.innerHTML = '<div style="padding:22px 18px"><div style="font-size:16px;font-weight:700;margin-bottom:10px">앱을 시작하지 못했어요</div><div style="font-size:12px;color:var(--amber-ink);background:var(--amber-bg);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto">' + msg + '</div>' +
+      '<button id="beReload" style="width:100%;height:48px;margin-top:14px;border:0.5px solid var(--border-strong);border-radius:10px;background:var(--surface-2);font-size:15px">새로고침</button>' +
+      '<button id="beReset" style="width:100%;height:48px;margin-top:10px;border:0.5px solid var(--danger-br);border-radius:10px;background:var(--surface-2);color:var(--danger);font-size:14px">데이터 초기화 후 재시작</button>' +
+      '<div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">먼저 새로고침을 눌러보고, 그래도 안 되면 초기화하세요. 초기화는 이 기기의 로컬 데이터만 지웁니다.</div></div>';
     var r = document.getElementById('beReload'); if (r) r.onclick = function () { location.reload(); };
     var z = document.getElementById('beReset'); if (z) z.onclick = function () { try { indexedDB.deleteDatabase(DB_NAME); } catch (x) {} setTimeout(function () { location.reload(); }, 300); };
   }
